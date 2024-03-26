@@ -61,7 +61,7 @@ Add this dependency to your project's POM:
 
 You'll need to manually install the following JARs:
 
-- [The LockerPM JAR](https://search.maven.org/remotecontent?filepath=com/stripe/stripe-java/24.16.0/stripe-java-24.16.0.jar)
+- [The LockerPM JAR](https://repo1.maven.org/maven2/io/locker/lockerpm/0.0.2/lockerpm-0.0.2-javadoc.jar)
 - [Google Gson][gson] from <https://repo1.maven.org/maven2/com/google/code/gson/gson/2.10.1/gson-2.10.1.jar>.
 
 ## Usage

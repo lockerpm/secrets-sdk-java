@@ -32,7 +32,7 @@ The documentation will be updated later.
 
 ## Requirements
 
-- Java 20 or later
+- Java 18 or later
 
 ## Installation
 
@@ -41,7 +41,7 @@ The documentation will be updated later.
 Add this dependency to your project's build file:
 
 ```groovy
-implementation 'io.locker:lockerpm:0.0.2'
+implementation 'io.locker:lockerpm:0.0.3'
 ```
 
 ### Maven users
@@ -53,7 +53,7 @@ Add this dependency to your project's POM:
 <dependency>
     <groupId>io.locker</groupId>
     <artifactId>lockerpm</artifactId>
-    <version>0.0.2</version>
+    <version>0.0.3</version>
 </dependency>
 ```
 
@@ -61,7 +61,7 @@ Add this dependency to your project's POM:
 
 You'll need to manually install the following JARs:
 
-- [The LockerPM JAR](https://repo1.maven.org/maven2/io/locker/lockerpm/0.0.2/lockerpm-0.0.2-javadoc.jar)
+- [The LockerPM JAR](https://repo1.maven.org/maven2/io/locker/lockerpm/0.0.3/lockerpm-0.0.3-javadoc.jar)
 - [Google Gson][gson] from <https://repo1.maven.org/maven2/com/google/code/gson/gson/2.10.1/gson-2.10.1.jar>.
 
 ## Usage

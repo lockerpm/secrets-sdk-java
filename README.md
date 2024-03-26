@@ -4,7 +4,7 @@
   <img src="https://cystack.net/images/logo-black.svg" alt="CyStack" width="50%"/>
 </p>
 
-[![Maven Central](https://img.shields.io/badge/maven--central-v24.16.0-blue)](https://central.sonatype.com/artifact/io.locker/lockerpm)
+[![Maven Central](https://img.shields.io/badge/maven--central-v0.0.2-blue)](https://central.sonatype.com/artifact/io.locker/lockerpm)
 
 The official [Locker][locker] Java client library.
 

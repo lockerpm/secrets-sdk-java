@@ -32,7 +32,7 @@ The documentation will be updated later.
 
 ## Requirements
 
-- Java 1.8 or later
+- Java 20 or later
 
 ## Installation
 
@@ -320,12 +320,11 @@ might want to install a [plugin][lombok-plugins] for your favorite IDE to
 facilitate development.
 
 
-[functional-tests]: https://github.com/locker/locker-java/blob/master/src/test/java/locker/functional/
+[functional-tests]: https://git.cystack.org/locker/secrets-sdk-java/-/tree/dev/src/test/java/locker/functional
 
-[examples' folder]: https://github.com/locker/locker-java/blob/master/src/test/java/locker/functional/
+[examples' folder]: https://git.cystack.org/locker/secrets-sdk-java/-/tree/dev/src/test/java/locker/functional
 
 [gson]: https://github.com/google/gson
-
 
 [lombok]: https://projectlombok.org
 
@@ -335,7 +334,7 @@ facilitate development.
 
 [spotless]: https://github.com/diffplug/spotless
 
-[locker]: https://locker.com
+[locker]: https://locker.io/
 
 <!--
 # vim: set tw=79:

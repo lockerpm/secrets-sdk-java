@@ -50,13 +50,13 @@ public class LiveLockerResponseGetter implements LockerResponseGetter {
         Boolean isJson = RequestOptions.getIsJsonFromType(typeToken);
         List<String> cli = apiRequest.getCli();
         LockerConfiguration config = LockerConfiguration.getInstance();
-
-        cli.add(0, config.getBinaryFilePath());
-        if (accessKeyId != null && !accessKeyId.isEmpty()){
+        String binaryFilePath = config.getBinaryFilePath();
+        cli.add(0, binaryFilePath);
+        if (accessKeyId != null && !accessKeyId.isEmpty()) {
             cli.add("--access-key-id");
             cli.add(accessKeyId);
         }
-        if (secretAccessKey != null && !secretAccessKey.isEmpty()){
+        if (secretAccessKey != null && !secretAccessKey.isEmpty()) {
             cli.add("--secret-access-key");
             cli.add(secretAccessKey);
         }
@@ -69,28 +69,9 @@ public class LiveLockerResponseGetter implements LockerResponseGetter {
         }
 
         if (isJson) {
-            cli.add("--verbose");
+            cli.add("--json");
         }
-        String postData = null;
-        CliResource.RequestMethod method = apiRequest.getMethod();
-        switch (method) {
-            case GET:
-            case DELETE:
-                break;
-            case POST:
-            case UPDATE:
-                Map<String, Object> params = apiRequest.getParams();
-                if (params != null) {
-                    postData = gson.toJson(apiRequest.getParams());
-                    if (postData != null || postData.isEmpty()) {
-                        postData = postData.replace("\"", "\\\"");
-                        cli.add("--data");
-                        cli.add(postData);
-                    }
-                }
 
-                break;
-        }
         Map<String, String> headers = options.getHeaders();
         if (headers != null && !headers.isEmpty()) {
             StringBuilder headersBuilder = new StringBuilder();
@@ -108,6 +89,7 @@ public class LiveLockerResponseGetter implements LockerResponseGetter {
         ProcessBuilder processBuilder = new ProcessBuilder();
 
         String[] optionsArray = cli.toArray(new String[0]);
+        System.out.println("optionsArray: " + String.join(" ", optionsArray));
         processBuilder.command(optionsArray);
         // Redirect the standard output
         processBuilder.redirectErrorStream(true);
@@ -128,14 +110,14 @@ public class LiveLockerResponseGetter implements LockerResponseGetter {
                     outputBuilder.append(line).append(System.lineSeparator());
                 }
                 int exitCode = process.waitFor();
-//        System.out.println("Process exited with code: " + exitCode);
                 // Process the output as needed
                 String output = outputBuilder.toString();
-//        System.out.println(output);
                 if (process.exitValue() == 0) {
                     raw = output;
                 } else {
                     List<String> signs = List.of("\"success\": false", "\"success\": true", "\"object\": \"error\"");
+                    System.out.println(output);
+
                     boolean isContainSign = false;
                     for (String sign : signs) {
                         if (output.contains(sign)) {
@@ -168,60 +150,15 @@ public class LiveLockerResponseGetter implements LockerResponseGetter {
             }
 
 
-        } catch (IOException | InterruptedException e ) {
+        } catch (IOException | InterruptedException e) {
             e.printStackTrace();
             CliRunError exc = new CliRunError(e.getMessage());
             throw exc;
-        }
-        finally {
+        } finally {
             if (process != null) {
                 process.destroy();
             }
         }
-//        try {
-//
-//            process = processBuilder.start();
-//            process.waitFor();
-//            String output = new String(process.getInputStream().readAllBytes());
-//            if (process.exitValue() == 0) {
-//                raw = output;
-//            } else {
-//                List<String> signs = List.of("\"success\": false", "\"success\": true", "\"object\": \"error\"");
-//                boolean isContainSign = false;
-//                for (String sign : signs) {
-//                    if (output.contains(sign)) {
-//                        raw = output;
-//                        isContainSign = true;
-//                        break;
-//                    }
-//                }
-//
-//                if (!isContainSign) {
-//                    CliRunError exc = new CliRunError(output);
-//                    throw exc;
-//                }
-//            }
-//
-//            raw = interpretResponse(raw);
-//            if (!isJson) {
-//                return (T) raw;
-//            } else {
-//                try {
-//                    resource = CliResource.deserializeLockerObject(raw, typeToken, this);
-//                } catch (JsonSyntaxException e) {
-//                    e.printStackTrace();
-//                    throw new ApiConnectionError("Invalid object: " + raw);
-//                } catch (Exception e) {
-//                    e.printStackTrace();
-//                }
-//                return resource;
-//            }
-//
-//        } catch (IOException | InterruptedException e) {
-//            e.printStackTrace();
-//            CliRunError exc = new CliRunError(e.getMessage());
-//            throw exc;
-//        }
 
     }
 
@@ -256,7 +193,6 @@ public class LiveLockerResponseGetter implements LockerResponseGetter {
     }
 
     private LockerError specificCliError(JsonObject errorData) {
-        // TODO: log error data
         int statusCode = errorData.has("status_code") ? errorData.get("status_code").getAsInt() : -1;
         String errorCode = errorData.has("error") ? errorData.get("error").getAsString() : "_";
         String message = errorData.has("message") ? errorData.get("message").getAsString() : "";

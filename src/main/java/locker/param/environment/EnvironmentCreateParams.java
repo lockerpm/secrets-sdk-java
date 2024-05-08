@@ -2,6 +2,9 @@ package locker.param.environment;
 
 import com.google.gson.annotations.SerializedName;
 import locker.net.CliRequestParams;
+import org.checkerframework.checker.units.qual.A;
+
+import java.util.ArrayList;
 
 public class EnvironmentCreateParams extends CliRequestParams {
     @SerializedName("name")
@@ -19,6 +22,20 @@ public class EnvironmentCreateParams extends CliRequestParams {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    @Override
+    public ArrayList<String> buildCliOptions() {
+        ArrayList<String> cliOptions = new ArrayList<>();
+        cliOptions.add("--name");
+        cliOptions.add(this.name);
+        cliOptions.add("--url");
+        cliOptions.add(this.externalUrl);
+        if (this.description != null && !this.description.isEmpty()) {
+            cliOptions.add("--description");
+            cliOptions.add(this.description);
+        }
+        return cliOptions;
     }
 
     public static class Builder {

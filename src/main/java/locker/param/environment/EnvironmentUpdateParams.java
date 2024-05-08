@@ -5,6 +5,8 @@ import locker.net.CliRequestParams;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.util.ArrayList;
+
 public class EnvironmentUpdateParams extends CliRequestParams {
     @SerializedName("name")
     @Getter
@@ -23,6 +25,24 @@ public class EnvironmentUpdateParams extends CliRequestParams {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    @Override
+    public ArrayList<String> buildCliOptions() {
+        ArrayList<String> cliOptions = new ArrayList<>();
+        if (this.name != null && !this.name.isEmpty()) {
+            cliOptions.add("--new-name");
+            cliOptions.add(this.name );
+        }
+        if (this.externalUrl != null && !this.externalUrl.isEmpty()) {
+            cliOptions.add("--new-url");
+            cliOptions.add(this.externalUrl);
+        }
+        if (this.description != null && !this.description.isEmpty()) {
+            cliOptions.add("--new-description");
+            cliOptions.add( this.description );
+        }
+        return cliOptions;
     }
 
     public static class Builder {

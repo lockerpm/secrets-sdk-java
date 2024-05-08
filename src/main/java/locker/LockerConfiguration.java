@@ -11,11 +11,11 @@ public class LockerConfiguration {
     private static LockerConfiguration instance;
     private static final Object lockObject = new Object();
     @Getter
-    private String sdkVersion;
+    private String sdkVersion = "0.0.4";
     private String lockerDir;
     @Getter
     private String binaryFilePath;
-    private String binaryVersion;
+    private String binaryVersion = "1.0.88";
 
     private LockerConfiguration() {
         initBinaryPath();
@@ -36,8 +36,6 @@ public class LockerConfiguration {
     private void initBinaryPath() {
         String homeDir = System.getProperty("user.home");
         lockerDir = Paths.get(homeDir, ".locker").toString();
-        binaryVersion = "1.0.82";
-        sdkVersion = "0.0.1";
         binaryFilePath = Paths.get(lockerDir, "locker_binary-" + binaryVersion).toString();
     }
 

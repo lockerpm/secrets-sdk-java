@@ -10,13 +10,9 @@ import locker.param.secret.SecretCreateParams;
 import locker.param.secret.SecretUpdateParams;
 
 
-
 public class LockerExample {
     public static void main(String[] args) {
-        LockerClient client = new LockerClient(
-                "your_access_key_id",
-                "your_access_key_secret"
-        );
+        LockerClient client = new LockerClient();
         SecretCreateParams secretCreateParams = SecretCreateParams.builder()
                 .setValue("your_secret_value")
                 .setKey("your_secret_key")

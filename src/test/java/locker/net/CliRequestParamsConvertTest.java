@@ -3,6 +3,7 @@ package locker.net;
 import com.google.gson.annotations.SerializedName;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -25,6 +26,11 @@ public class CliRequestParamsConvertTest {
       this.extraParams = new HashMap<>();
       this.extraParams.put("hello", "world");
     }
+
+    @Override
+    public ArrayList<String> buildCliOptions() {
+      return null;
+    }
   }
 
   private static class HasMetadataParams extends CliRequestParams {
@@ -36,6 +42,11 @@ public class CliRequestParamsConvertTest {
 
     @SerializedName("object_map")
     Map<String, ModelHasExtraParams> objectMap;
+
+    @Override
+    public ArrayList<String> buildCliOptions() {
+      return null;
+    }
   }
 
   @Test

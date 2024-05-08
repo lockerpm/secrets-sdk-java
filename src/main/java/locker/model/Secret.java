@@ -47,4 +47,7 @@ public class Secret extends CliResource implements HasId {
 
     @SerializedName("description")
     String description;
+
+    @SerializedName("hash")
+    String hash;
 }

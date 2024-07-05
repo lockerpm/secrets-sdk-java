@@ -11,7 +11,7 @@ public class LockerConfiguration {
     private static LockerConfiguration instance;
     private static final Object lockObject = new Object();
     @Getter
-    private String sdkVersion = "0.0.4";
+    private String sdkVersion = "0.0.5";
     private String lockerDir;
     @Getter
     private String binaryFilePath;

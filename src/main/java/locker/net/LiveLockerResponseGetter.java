@@ -69,7 +69,8 @@ public class LiveLockerResponseGetter implements LockerResponseGetter {
         }
 
         if (isJson) {
-            cli.add("--json");
+            cli.add("--output-format");
+            cli.add("json");
         }
 
         Map<String, String> headers = options.getHeaders();

@@ -11,11 +11,11 @@ public class LockerConfiguration {
     private static LockerConfiguration instance;
     private static final Object lockObject = new Object();
     @Getter
-    private String sdkVersion = "0.0.4";
+    private String sdkVersion = "0.0.2";
     private String lockerDir;
     @Getter
     private String binaryFilePath;
-    private String binaryVersion = "1.0.88";
+    private String binaryVersion = "1.0.100";
 
     private LockerConfiguration() {
         initBinaryPath();
@@ -45,12 +45,12 @@ public class LockerConfiguration {
         String arch = System.getProperty("os.arch");
 
         if (osName.contains("mac")) {
-            binaryUrl = "https://s.locker.io/download/locker-cli-mac-" + (arch.equals("aarch64") ? "arm64" : "x64") + "-" + binaryVersion;
+            binaryUrl = "https://s.locker.io/download/locker-cli-mac-" + (arch.equals("aarch64") ||(arch.equals("arm64")) ? "arm64" : "x64") + "-" + binaryVersion;
         } else if (osName.contains("win")) {
             binaryUrl = "https://s.locker.io/download/locker-cli-win-x64-" + binaryVersion + ".exe";
             binaryFilePath = Paths.get(lockerDir, "locker_binary-" + binaryVersion + ".exe").toString();
         } else {
-            binaryUrl = "https://s.locker.io/download/locker-cli-linux-x64-" + binaryVersion;
+            binaryUrl = "https://s.locker.io/download/locker-cli-linux-"+ (arch.equals("aarch64") ||(arch.equals("arm64")) ? "arm64" : "x64") + "-" + binaryVersion;
         }
 
         // Check if the .locker directory exists, and create it if not

@@ -3,12 +3,12 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>io.locker</groupId>
-    <artifactId>lockerpm</artifactId>
-    <version>0.0.4</version>
+    <artifactId>lockersm</artifactId>
+    <version>0.0.2</version>
     <packaging>jar</packaging>
 
-    <name>LockerPM</name>
-    <description>Locker Password Manager</description>
+    <name>LockerSM</name>
+    <description>The Locker Secret Java SDK provides convenient access to the Locker Secret API from applications written in the Java language. It includes a pre-defined set of classes for API resources that initialize themselves dynamically from API responses which makes it compatible with a wide range of versions of the Locker Secret API.</description>
     <url>https://locker.io/</url>
 
     <developers>

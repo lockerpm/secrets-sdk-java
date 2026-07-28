@@ -22,7 +22,7 @@ public class Environment extends CliResource implements HasId {
     @SerializedName("revision_date")
     Float revisionDate;
 
-    @SerializedName("update_date")
+    @SerializedName(value = "updated_date", alternate = {"update_date"})
     Float updateDate;
 
     @SerializedName("name")
@@ -36,4 +36,7 @@ public class Environment extends CliResource implements HasId {
 
     @SerializedName("hash")
     String hash;
+
+    @SerializedName("project_id")
+    Integer projectId;
 }

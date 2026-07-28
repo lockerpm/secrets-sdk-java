@@ -32,26 +32,7 @@ public class SecretUpdateParams extends CliRequestParams {
 
     @Override
     public ArrayList<String> buildCliOptions() {
-        ArrayList<String> cliOptions = new ArrayList<>();
-        if (this.key != null && !this.key.isEmpty()) {
-            cliOptions.add("--new-key");
-            cliOptions.add(this.key);
-        }
-
-        if (this.value != null && !this.value.isEmpty()) {
-            cliOptions.add("--new-value");
-            cliOptions.add(this.value);
-        }
-
-        if (this.description != null && !this.description.isEmpty()) {
-            cliOptions.add("--new-description");
-            cliOptions.add(this.description);
-        }
-        if (this.environmentName != null) {
-            cliOptions.add("--new-environment");
-            cliOptions.add(this.environmentName);
-        }
-        return cliOptions;
+        return new ArrayList<>();
     }
 
     public static class Builder {
@@ -86,6 +67,14 @@ public class SecretUpdateParams extends CliRequestParams {
 
         public Builder setEnvironmentName(String environmentName) {
             this.environmentName = environmentName;
+            return this;
+        }
+
+        /**
+         * Clears the environment association for the updated secret.
+         */
+        public Builder clearEnvironment() {
+            this.environmentName = "";
             return this;
         }
     }

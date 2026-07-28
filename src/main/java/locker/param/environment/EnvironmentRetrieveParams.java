@@ -7,6 +7,6 @@ import java.util.ArrayList;
 public class EnvironmentRetrieveParams extends CliRequestParams {
     @Override
     public ArrayList<String> buildCliOptions() {
-        return null;
+        return new ArrayList<>();
     }
 }

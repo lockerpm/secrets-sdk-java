@@ -8,6 +8,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class CliRequestParamsConvertTest {
   private CliRequestParamsConverter converter = new CliRequestParamsConverter();
@@ -49,6 +51,21 @@ public class CliRequestParamsConvertTest {
     }
   }
 
+  private static class HasConflictingExtraParams extends CliRequestParams {
+    private String value = "safe-original";
+
+    @SerializedName(CliRequestParams.EXTRA_PARAMS_KEY)
+    private Map<String, Object> extraParams = Map.of(
+        "value",
+        "sensitive-conflicting-value"
+    );
+
+    @Override
+    public ArrayList<String> buildCliOptions() {
+      return null;
+    }
+  }
+
   @Test
   @SuppressWarnings("unchecked")
   public void testObjectMaps() {
@@ -71,6 +88,19 @@ public class CliRequestParamsConvertTest {
 
     assertEquals(objBar.get("string_value"), "foo");
     assertEquals(objBar.get("hello"), "world");
+  }
+
+  @Test
+  public void duplicateParameterErrorDoesNotContainValues() {
+    IllegalArgumentException error = assertThrows(
+        IllegalArgumentException.class,
+        () -> toMap(new HasConflictingExtraParams())
+    );
+
+    assertFalse(error.getMessage().contains("safe-original"));
+    assertFalse(
+        error.getMessage().contains("sensitive-conflicting-value")
+    );
   }
 
   private Map<String, Object> toMap(CliRequestParams params) {

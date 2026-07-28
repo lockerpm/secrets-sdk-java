@@ -1,29 +1,31 @@
 package locker.net;
 
-
-import lombok.AccessLevel;
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 
 import java.util.List;
+import java.util.Objects;
 
 @Getter
-@AllArgsConstructor(access = AccessLevel.PROTECTED)
 class BaseCliRequest {
     private final CliResource.RequestMethod method;
     private final List<String> cli;
     private final RequestOptions options;
+    private final List<String> usage;
 
-    // TODO (major): Remove setter and make final
-    private List<String> usage;
-
-    /**
-     *
-     */
-    @Deprecated
-    public void setUsage(List<String> usage) {
-        this.usage = usage;
+    protected BaseCliRequest(
+            CliResource.RequestMethod method,
+            List<String> cli,
+            RequestOptions options,
+            List<String> usage
+    ) {
+        this.method = Objects.requireNonNull(
+                method,
+                "method must not be null"
+        );
+        this.cli = List.copyOf(
+                Objects.requireNonNull(cli, "cli must not be null")
+        );
+        this.options = options;
+        this.usage = usage == null ? List.of() : List.copyOf(usage);
     }
-
-
 }

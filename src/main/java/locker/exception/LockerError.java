@@ -2,11 +2,13 @@ package locker.exception;
 
 
 public abstract class LockerError extends Exception {
+    private static final long serialVersionUID = 1L;
 
-
-    private String errorCode;
-
-    private String jsonBody;
+    private final String errorCode;
+    private final String jsonBody;
+    private final Integer protocolCode;
+    private final String requestId;
+    private final Boolean retryable;
 
     protected LockerError(String message, String jsonBody, String errorCode) {
         this(message, jsonBody, errorCode, null);
@@ -21,14 +23,28 @@ public abstract class LockerError extends Exception {
      */
     protected LockerError(
             String message, String jsonBody, String errorCode, Throwable e) {
-        super(message, e);
+        this(message, jsonBody, errorCode, null, null, null, e);
+    }
+
+    protected LockerError(
+            String message,
+            String jsonBody,
+            String errorCode,
+            Integer protocolCode,
+            String requestId,
+            Boolean retryable,
+            Throwable cause
+    ) {
+        super(message, cause);
         this.jsonBody = jsonBody;
         this.errorCode = errorCode;
-
+        this.protocolCode = protocolCode;
+        this.requestId = requestId;
+        this.retryable = retryable;
     }
 
     protected LockerError(String message, Throwable e) {
-        super(message, e);
+        this(message, null, null, null, null, null, e);
     }
 
     @Override
@@ -47,5 +63,25 @@ public abstract class LockerError extends Exception {
      */
     public String getUserMessage() {
         return super.getMessage();
+    }
+
+    public String getErrorCode() {
+        return errorCode;
+    }
+
+    public String getJsonBody() {
+        return jsonBody;
+    }
+
+    public Integer getProtocolCode() {
+        return protocolCode;
+    }
+
+    public String getRequestId() {
+        return requestId;
+    }
+
+    public Boolean getRetryable() {
+        return retryable;
     }
 }

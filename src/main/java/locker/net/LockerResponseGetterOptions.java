@@ -1,5 +1,6 @@
 package locker.net;
 
+import java.time.Duration;
 import java.util.Map;
 
 public abstract class LockerResponseGetterOptions {
@@ -13,5 +14,20 @@ public abstract class LockerResponseGetterOptions {
 
 
     public abstract Map<String, String> getHeaders();
+
+    /**
+     * Optional explicit Locker CLI path. Returning {@code null} falls back to
+     * {@code LOCKER_CLI_PATH}, then the signed managed update channel.
+     */
+    public String getCliPath() {
+        return null;
+    }
+
+    /**
+     * Maximum duration for one CLI protocol exchange.
+     */
+    public Duration getCliTimeout() {
+        return CliProcessRunner.DEFAULT_TIMEOUT;
+    }
 
 }

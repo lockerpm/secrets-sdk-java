@@ -28,23 +28,7 @@ public class SecretCreateParams extends CliRequestParams {
 
     @Override
     public ArrayList<String> buildCliOptions() {
-        ArrayList<String> cliOptions = new ArrayList<>();
-        cliOptions.add("--key");
-        cliOptions.add(this.key );
-        if (this.value == null) {
-            this.value = "";
-        }
-        cliOptions.add("--value");
-        cliOptions.add( this.value );
-        if (this.description != null && !this.description.isEmpty()) {
-            cliOptions.add("--description");
-            cliOptions.add(this.description );
-        }
-        if (this.environmentName != null && !this.environmentName.isEmpty()) {
-            cliOptions.add("--environment");
-            cliOptions.add( this.environmentName);
-        }
-        return cliOptions;
+        return new ArrayList<>();
     }
 
     public static class Builder {

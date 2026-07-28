@@ -1,83 +1,50 @@
 package locker;
 
-import lombok.Getter;
+/**
+ * Runtime configuration shared by the Locker Java SDK.
+ *
+ * <p>The SDK deliberately does not download a CLI binary during class loading
+ * or client construction. Managed installation is an explicit lifecycle
+ * operation backed by update-channel v2 metadata signed by the release key
+ * embedded in the SDK artifact. CI never rewrites that committed trust root;
+ * release validation compares it with an independently protected key.
+ */
+public final class LockerConfiguration {
+    public static final String SDK_VERSION = "1.0.0";
+    public static final String CLI_PATH_ENVIRONMENT_VARIABLE =
+            "LOCKER_CLI_PATH";
 
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.Paths;
+    private static final LockerConfiguration INSTANCE =
+            new LockerConfiguration();
 
-
-public class LockerConfiguration {
-    private static LockerConfiguration instance;
-    private static final Object lockObject = new Object();
-    @Getter
-    private String sdkVersion = "0.0.2";
-    private String lockerDir;
-    @Getter
-    private String binaryFilePath;
-    private String binaryVersion = "1.0.100";
+    private final String binaryFilePath;
 
     private LockerConfiguration() {
-        initBinaryPath();
-        downloadBinaryFile();
+        binaryFilePath = configuredValue(
+                System.getenv(CLI_PATH_ENVIRONMENT_VARIABLE)
+        );
     }
 
     public static LockerConfiguration getInstance() {
-        if (instance == null) {
-            synchronized (lockObject) {
-                if (instance == null) {
-                    instance = new LockerConfiguration();
-                }
-            }
-        }
-        return instance;
+        return INSTANCE;
     }
 
-    private void initBinaryPath() {
-        String homeDir = System.getProperty("user.home");
-        lockerDir = Paths.get(homeDir, ".locker").toString();
-        binaryFilePath = Paths.get(lockerDir, "locker_binary-" + binaryVersion).toString();
+    public String getSdkVersion() {
+        return SDK_VERSION;
     }
 
-    private void downloadBinaryFile() {
-        String binaryUrl;
-        String osName = System.getProperty("os.name").toLowerCase();
-        String arch = System.getProperty("os.arch");
-
-        if (osName.contains("mac")) {
-            binaryUrl = "https://s.locker.io/download/locker-cli-mac-" + (arch.equals("aarch64") ||(arch.equals("arm64")) ? "arm64" : "x64") + "-" + binaryVersion;
-        } else if (osName.contains("win")) {
-            binaryUrl = "https://s.locker.io/download/locker-cli-win-x64-" + binaryVersion + ".exe";
-            binaryFilePath = Paths.get(lockerDir, "locker_binary-" + binaryVersion + ".exe").toString();
-        } else {
-            binaryUrl = "https://s.locker.io/download/locker-cli-linux-"+ (arch.equals("aarch64") ||(arch.equals("arm64")) ? "arm64" : "x64") + "-" + binaryVersion;
-        }
-
-        // Check if the .locker directory exists, and create it if not
-        File lockerDirFile = new File(lockerDir);
-        if (!lockerDirFile.exists()) {
-            lockerDirFile.mkdirs();
-        }
-
-        // Download binary file
-        File binaryFile = new File(binaryFilePath);
-        if (!binaryFile.exists()) {
-            try {
-                System.out.println("Saving to " + binaryFile.getAbsolutePath());
-                ProcessBuilder processBuilder = new ProcessBuilder("curl", "-o", binaryFile.getAbsolutePath(), binaryUrl);
-                Process process = processBuilder.start();
-                process.waitFor();
-                process.destroy();
-
-                binaryFile.setExecutable(true);
-                binaryFile.setReadable(true);
-                binaryFile.setWritable(false);
-
-            } catch (IOException | InterruptedException e) {
-                e.printStackTrace();
-            }
-
-        }
+    /**
+     * Returns the caller-configured CLI path, or {@code null} when no trusted
+     * CLI distribution has been configured.
+     */
+    public String getBinaryFilePath() {
+        return binaryFilePath;
     }
 
+    private static String configuredValue(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
+    }
 }

@@ -5,6 +5,9 @@ import locker.net.LockerResponseGetter;
 import locker.net.LockerResponseGetterOptions;
 import lombok.Getter;
 
+import java.time.Duration;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 
@@ -69,22 +72,62 @@ public class LockerClient {
         private final String secretAccessKey;
         private final String apiBase;
         private final Map<String, String> headers;
+        private final String cliPath;
+        private final Duration cliTimeout;
 
         ClientLockerResponseGetterOptions(String accessKeyId, String secretAccessKey) {
-            this(accessKeyId, secretAccessKey, null, null);
+            this(
+                    accessKeyId,
+                    secretAccessKey,
+                    null,
+                    null,
+                    null,
+                    null
+            );
 
         }
 
         ClientLockerResponseGetterOptions(String accessKeyId, String secretAccessKey, String apiBase) {
-            this(accessKeyId, secretAccessKey, apiBase, null);
+            this(
+                    accessKeyId,
+                    secretAccessKey,
+                    apiBase,
+                    null,
+                    null,
+                    null
+            );
 
         }
 
         public ClientLockerResponseGetterOptions(String accessKeyId, String secretAccessKey, String apiBase, Map<String, String> headers) {
+            this(
+                    accessKeyId,
+                    secretAccessKey,
+                    apiBase,
+                    headers,
+                    null,
+                    null
+            );
+        }
+
+        ClientLockerResponseGetterOptions(
+                String accessKeyId,
+                String secretAccessKey,
+                String apiBase,
+                Map<String, String> headers,
+                String cliPath,
+                Duration cliTimeout
+        ) {
             this.accessKeyId = accessKeyId;
             this.secretAccessKey = secretAccessKey;
             this.apiBase = apiBase;
-            this.headers = headers;
+            this.headers = headers == null
+                    ? null
+                    : Collections.unmodifiableMap(
+                            new LinkedHashMap<>(headers)
+                    );
+            this.cliPath = cliPath;
+            this.cliTimeout = cliTimeout;
         }
 
         @Override
@@ -106,6 +149,19 @@ public class LockerClient {
         public Map<String, String> getHeaders() {
             return this.headers;
         }
+
+        @Override
+        public String getCliPath() {
+            return this.cliPath;
+        }
+
+        @Override
+        public Duration getCliTimeout() {
+            return this.cliTimeout == null
+                    ? super.getCliTimeout()
+                    : this.cliTimeout;
+        }
+
     }
 
 
@@ -118,6 +174,10 @@ public class LockerClient {
         String apiBase;
         @Getter
         private Map<String, String> headers;
+        @Getter
+        private String cliPath;
+        @Getter
+        private Duration cliTimeout;
 
         public LockerClientBuilder(String accessKeyId, String secretAccessKey) {
 
@@ -158,6 +218,16 @@ public class LockerClient {
             return this;
         }
 
+        public LockerClientBuilder setCliPath(String cliPath) {
+            this.cliPath = cliPath;
+            return this;
+        }
+
+        public LockerClientBuilder setCliTimeout(Duration cliTimeout) {
+            this.cliTimeout = cliTimeout;
+            return this;
+        }
+
         public LockerClientBuilder() {
 
         }
@@ -167,8 +237,14 @@ public class LockerClient {
                     this.accessKeyId,
                     this.secretAccessKey,
                     this.apiBase,
-                    this.headers
+                    this.headers,
+                    this.cliPath,
+                    this.cliTimeout
             );
+        }
+
+        public LockerClient build() {
+            return new LockerClient(new LiveLockerResponseGetter(buildOptions()));
         }
     }
 }

@@ -1,341 +1,464 @@
-# Locker Secret Java client library
+# Locker Secrets Java SDK
 
-<p align="center">
-  <img src="https://cystack.net/images/logo-black.svg" alt="CyStack" width="50%"/>
-</p>
+[![Maven Central](https://img.shields.io/maven-central/v/io.locker/lockersm.svg)](https://central.sonatype.com/artifact/io.locker/lockersm)
 
-[![Maven Central](https://img.shields.io/badge/maven--central-v0.0.2-blue)](https://central.sonatype.com/artifact/io.locker/lockerpm)
+The official Java SDK for Locker Passwords & Secrets Management.
 
-The official [Locker][locker] Java client library.
-
----
-
-The Locker Secret Java Client library provides convenient access to the Locker Secret API from applications written in
-the
-Java language. It includes a pre-defined set of classes for API resources that initialize themselves dynamically
-from API responses which makes it compatible with a wide range of versions of the Locker Secret API.
-
-## The Developer - CyStack
-
-The Locker Secret Java Client Library is developed by CyStack, one of the leading cybersecurity companies in Vietnam.
-CyStack is a member of Vietnam Information Security Association (VNISA) and Vietnam Association of CyberSecurity
-Product Development. CyStack is a partner providing security solutions and services for many large domestic and
-international enterprises.
-
-CyStack’s research has been featured at the world’s top security events such as BlackHat USA (USA),
-BlackHat Asia (Singapore), T2Fi (Finland), XCon - XFocus (China)... CyStack experts have been honored by global
-corporations such as Microsoft, Dell, Deloitte, D-link...
-
-## Documentation
-
-The documentation will be updated later.
+The SDK uses the Locker CLI's versioned JSON-RPC protocol. Application code
+works with typed Java services while credentials, custom headers, secret
+values, and mutation data are sent to `locker sdk` through stdin. Sensitive
+data is never added to process arguments or SDK logs.
 
 ## Requirements
 
-- Java 18 or later
+- Java 11 or later
+- Maven 3.9 or later for building the SDK
+- A Locker CLI binary that supports SDK protocol v1
 
 ## Installation
 
-### Gradle users
-
-Add this dependency to your project's build file:
-
-```groovy
-implementation 'io.locker:lockerpm:0.0.3'
-```
-
-### Maven users
-
-Add this dependency to your project's POM:
+Maven:
 
 ```xml
-
 <dependency>
     <groupId>io.locker</groupId>
-    <artifactId>lockerpm</artifactId>
-    <version>0.0.3</version>
+    <artifactId>lockersm</artifactId>
+    <version>1.0.0</version>
 </dependency>
 ```
 
-### Others
+Gradle:
 
-You'll need to manually install the following JARs:
+```groovy
+implementation("io.locker:lockersm:1.0.0")
+```
 
-- [The LockerPM JAR](https://repo1.maven.org/maven2/io/locker/lockerpm/0.0.3/lockerpm-0.0.3-javadoc.jar)
-- [Google Gson][gson] from <https://repo1.maven.org/maven2/com/google/code/gson/gson/2.10.1/gson-2.10.1.jar>.
+## Configure the client
 
-## Usage
+CLI resolution order is:
 
-### Configuration access key
+1. an explicit `setCliPath` value;
+2. `LOCKER_CLI_PATH`;
+3. the canonical managed binary resolved through the signed Locker CLI
+   update channel.
 
-The SDK needs to be configured with your access key id and your secret access key, which is available in your Locker
-Secret Dashboard. These keys must not be disclosed.These keys must not be disclosed. If you reveal these keys, you need
-to revoke them immediately. Environment variables are a good solution and they are easy to consume in most programming
-languages.
+Java-owned managed state lives under `~/.locker/sdk-cli/java`. Each release
+is an immutable directory below `generations/`; `locker.current.json`
+atomically selects the active `locker` (or `locker.exe`) generation.
 
-#### Set up credentials on Linux/MacOS
+An explicit path or `LOCKER_CLI_PATH` is caller-owned and bypasses the managed
+updater completely. It must be an absolute path to an executable regular,
+non-symlink file; bare command names and relative paths are rejected, and the
+SDK never searches the ambient `PATH`.
+Without either override, the SDK verifies or refreshes its managed binary when
+the first operation runs. Importing the package and constructing a client or
+installer never performs filesystem or network I/O.
+
+The stable, reviewed production trust root is compiled into
+`LockerCliInstaller` and mirrored in the committed public-key resource for
+release attestation. Runtime lookup never accepts a same-name resource from
+another classpath entry. CI never rewrites either copy.
+
+Use the Locker-prefixed environment variables for credentials:
 
 ```shell
-export ACCESS_KEY_ID=<YOUR_ACCESS_KEY_ID>
-export SECRET_ACCESS_KEY=<YOUR_SECRET_ACCESS_KEY>
+export LOCKER_CLI_PATH=/usr/local/bin/locker
+export LOCKER_ACCESS_KEY_ID=<access-key-id>
+export LOCKER_SECRET_ACCESS_KEY=<secret-access-key>
 ```
 
-#### Set up credentials on Windows
+PowerShell:
 
-Powershell
-
-```shell
-$Env:ACCESS_KEY_ID = '<YOUR_ACCESS_KEY_ID>'
-$Env:SECRET_ACCESS_KEY = '<SECRET_ACCESS_KEY>'
+```powershell
+$Env:LOCKER_CLI_PATH = 'C:\Program Files\Locker\locker.exe'
+$Env:LOCKER_ACCESS_KEY_ID = '<access-key-id>'
+$Env:LOCKER_SECRET_ACCESS_KEY = '<secret-access-key>'
 ```
 
-Command Prompt
+For migration only, the SDK also accepts `ACCESS_KEY_ID` and the legacy
+secret aliases in this precedence order:
+`SECRET_ACCESS_KEY`, `LOCKER_ACCESS_KEY_SECRET`, then `ACCESS_KEY_SECRET`.
+Explicit client configuration takes precedence over every environment
+variable. New deployments should use only the canonical `LOCKER_*` names.
 
-```shell
-set ACCESS_KEY_ID=<YOUR_ACCESS_KEY_ID>
-set SECRET_ACCESS_KEY=<YOUR_SECRET_ACCESS_KEY>
-```
-
-You also need to set `api_base` value (default is `https://api.locker.io/locker_secrets`).
-If you need to set your custom headers, you also need to set `headers` value in the `options` param:
-
-```java
-Map<String, String> headers = new HashMap<String, String>() {
-    {
-        put("CF-Access-Client-Id", "YOUR_CF_ACCESS_CLIENT_ID");
-        put("CF-Access-Client-Secret", "YOUR_CF_ACCESS_CLIENT_SECRET");
-    }
-};
-LockerResponseGetterOptions responseGetter = new LockerClient.LockerClientBuilder().setApiBase(
-        "YOUR_API_BASE"
-).setHeaders(headers).buildOptions();
-LockerClient client = new LockerClient(new LiveLockerResponseGetter(responseGetter));
-
-```
-
-You can also pass parameters or use the shared credential file (~/.locker/credentials), but we do
-not recommend these ways.
+The default client reads those values when it executes an operation:
 
 ```java
 import locker.LockerClient;
-import locker.exception.LockerError;
 
+LockerClient client = LockerClient.builder().build();
+```
+
+You can configure all values explicitly when your application's secret
+provider supplies them:
+
+```java
+import java.time.Duration;
+import locker.LockerClient;
+
+LockerClient client = LockerClient.builder()
+        .setCliPath("/opt/locker/bin/locker")
+        .setAccessKeyId(accessKeyId)
+        .setSecretAccessKey(secretAccessKey)
+        .setCliTimeout(Duration.ofSeconds(30))
+        .build();
+```
+
+## Signed managed CLI updates
+
+The default client resolves the managed CLI lazily. Applications that want to
+prepare it during startup or deployment can call the same lifecycle
+explicitly:
+
+```java
+import java.nio.file.Path;
+import locker.distribution.LockerCliInstaller;
+
+// This is the only call here that may perform network I/O.
+Path installedCli = new LockerCliInstaller().install();
+```
+
+Update-channel v2 has one trust root: the raw 32-byte Ed25519 public key
+compiled into the installer as canonical base64url. The matching
+`locker-cli-ed25519-public-key.txt` resource lets release verification attest
+the source, compiled classes, and packaged JAR. The updater fetches the exact
+`https://files.locker.io/cli/releases/latest.json` endpoint without redirects, verifies
+its signed canonical JSON envelope, then verifies the referenced signed
+version manifest. It requires the exact five supported platform targets and
+binds the selected artifact's version, path, size, SHA-256, and detached
+Ed25519 signature to those documents.
+
+Downloaded binaries are streamed through a bounded whole-response deadline
+into a private same-filesystem temporary file. Before publication, the updater
+verifies the declared 1..256 MiB size, digest, detached signature, and strict
+ELF/Mach-O/PE target header. It flushes every file, atomically publishes one
+complete immutable generation, fully reverifies that generation, and replaces
+the small current pointer last. Metadata, state, and every cached binary are
+revalidated under a bounded interprocess lock. Symlinks/reparse points,
+permissive ownership, partial files, unknown schema fields, duplicate JSON
+keys, non-canonical encodings, rollback, and same-version equivocation fail
+closed.
+
+A successful check is persisted for six hours. Each later SDK operation
+resolves the managed path again; a long-running client atomically rebuilds its
+protocol/capability client when the selected generation changes. A due check
+always revalidates the signed latest pointer and manifest, without downloading
+an unchanged artifact. The accepted `(version, source_commit, manifest
+SHA-256, manifest size)` high-water tuple is persisted before any manifest
+request, independently from the successful-check timestamp, so a partial
+update cannot later permit rollback or same-version equivocation. A transient
+fallback gets a 60-second retry marker without advancing the six-hour success
+interval.
+
+Only DNS/connect/timeout transport failures and HTTP 408, 425, 429, or
+500..599 may fall back to a completely verified cache. TLS/certificate,
+signature, schema, executable-header, hash, size, rollback, state, and other
+integrity failures never use an offline fallback. A process crash at any
+publication boundary leaves either the old pointed generation or the complete
+new one recoverable offline.
+
+## Release safety
+
+The release pipeline accepts only a protected canonical `v<SDK_VERSION>`
+SemVer tag. Its automatic `release-readiness` job requires:
+
+- a protected, independent `LOCKER_CLI_PUBLIC_KEY_FILE` file variable
+  containing exactly one canonical base64url-encoded raw 32-byte Ed25519
+  public key and one final LF, byte-equal to the committed trust root;
+- a protected `MAVEN_GPG_KEY_FILE` file variable and masked
+  `MAVEN_GPG_PASSPHRASE`;
+- masked `MAVEN_CENTRAL_USERNAME` and `MAVEN_CENTRAL_PASSWORD` variables for
+  the later publish job.
+
+Release validation fails closed when `LICENSE` is absent or empty, the tag
+does not equal `v` plus the POM/SDK version, the public key is malformed, or
+the key embedded in the built SDK differs byte-for-byte from the protected
+release key. The verifier reads the committed source resource and compiled
+main resource by filesystem path, never through the test classpath, and the
+Central bundle builder independently verifies the entry in the exact JAR
+bytes it packages.
+
+The `release` Maven profile signs one artifact set, after which the
+release-readiness job builds and verifies one Central deployment bundle
+without network publication. CI records that bundle's SHA-256 and
+source/tag/profile attestation. A protected manual staging job revalidates and
+uploads those exact bytes as a `USER_MANAGED` Central deployment, waits for
+`VALIDATED`, and persists the bound deployment ID. A separate protected manual
+publish job promotes only that ID and waits for `PUBLISHED`; neither job
+rebuilds or re-uploads the release bundle.
+
+The staging and publish jobs use a test-scope Java release client rather than
+putting an authorization header in a shell command. It reads Central
+credentials only from the protected environment, rejects delimiters and
+control characters, never logs them, refuses redirects, bounds every response,
+and parses status JSON strictly. Duplicate or escaped-duplicate fields,
+trailing data, non-string identifiers/states, unknown states, and a response
+whose deployment ID does not exactly match the persisted ID all fail closed.
+
+The Central upload endpoint has no caller-supplied idempotency key. Do not
+retry a staging job blindly after its upload starts: first inspect the
+persisted `central-deployment-id` artifact and Central Portal, otherwise a
+failed runner can leave an orphaned user-managed deployment. Protect both
+Maven Central environments, the SemVer tag pattern, and every listed variable
+in GitLab project settings.
+
+Do not hard-code credentials or secret values in source code. The SDK starts
+the child CLI with a small operating-system/proxy/certificate environment
+allowlist, so application secrets are not inherited accidentally.
+It continuously records descendant handles and, on timeout, interruption, or
+even a successful root exit, performs bounded graceful/forced cleanup and
+verifies that every recorded process stopped. Java 11 exposes neither portable
+POSIX process groups nor Windows Job Objects, so a process created and
+re-parented entirely between samples remains a standard-library limitation.
+The supported trust boundary is therefore an explicit caller-owned CLI or the
+cryptographically verified managed binary; run any untrusted executable under
+an OS/container supervisor.
+
+An optional API base and custom transport headers can be configured on the
+builder:
+
+```java
+import java.util.Map;
+
+LockerClient client = LockerClient.builder()
+        .setApiBase("https://api.locker.io/locker_secrets")
+        .setHeaders(Map.of("CF-Access-Client-Id", clientId))
+        .build();
+```
+
+## Retrieve a secret
+
+Use `String.class` when the application only needs the value:
+
+```java
+String databasePassword = client.secrets().retrieve(
+        "DATABASE_PASSWORD",
+        String.class,
+        "production"
+);
+```
+
+Use `Secret.class` when metadata is required:
+
+```java
 import locker.model.Secret;
-import locker.param.secret.SecretRetrieveParams;
 
-public class LockerExample {
-    public static void main(String[] args) {
-        LockerClient client = new LockerClient("YOUR_ACCESS_KEY_ID", "YOUR_ACCESS_KEY_SECRET");
-        SecretRetrieveParams params = new SecretRetrieveParams();
+Secret secret = client.secrets().retrieve(
+        "DATABASE_PASSWORD",
+        Secret.class
+);
+```
 
-        try {
-            Secret secret = client.secrets().retrieve("YOUR_SECRET_KEY", Secret.class);
-            System.out.println(secret);
+`Secret.toString()` always redacts the value. Avoid logging
+`secret.getValue()` or the retrieved string.
 
-        } catch (LockerError e) {
-            e.printStackTrace();
-        }
-    }
+## List secrets
+
+```java
+import com.google.gson.reflect.TypeToken;
+import java.lang.reflect.Type;
+import locker.model.LockerCollection;
+import locker.model.Secret;
+
+Type secretListType = new TypeToken<LockerCollection<Secret>>() {
+}.getType();
+
+LockerCollection<Secret> secrets = client.secrets().list(secretListType);
+```
+
+Filter by environment:
+
+```java
+LockerCollection<Secret> productionSecrets = client.secrets().list(
+        locker.param.secret.SecretListParams.builder()
+                .setEnvironmentName("production")
+                .build(),
+        null,
+        secretListType
+);
+```
+
+For large vaults, use the bounded page API. Cursors are opaque; return them
+unchanged on the next request:
+
+```java
+import locker.model.SecretPage;
+import locker.param.secret.SecretListPageParams;
+
+SecretPage page = client.secrets().listPage(
+        SecretListPageParams.builder()
+                .setEnvironmentName("production")
+                .setPageSize(100)
+                .build()
+);
+
+while (page.getNextCursor() != null) {
+    page = client.secrets().listPage(
+            SecretListPageParams.builder()
+                    .setEnvironmentName("production")
+                    .setPageSize(100)
+                    .setCursor(page.getNextCursor())
+                    .build()
+    );
 }
 ```
 
-See the project's [functional tests][functional-tests] for more examples.
+`client.environments().listPage(...)` returns the corresponding typed
+`EnvironmentPage`.
 
-### Per-request Configuration
+If a legacy unpaginated list cannot fit the negotiated response bound, it
+throws `ApiError` with protocol code `-32000`, error code
+`response_too_large`, and `retryable == false`; switch to `listPage` rather
+than retrying the same list call.
 
-All of the request methods accept an optional `RequestOptions` object. This is
-used if you want to set access key id, secret access key or headers on each method
+## Create and update secrets
 
 ```java
+import locker.model.Secret;
+import locker.param.secret.SecretCreateParams;
+import locker.param.secret.SecretUpdateParams;
+
+Secret created = client.secrets().create(
+        SecretCreateParams.builder()
+                .setKey("DATABASE_PASSWORD")
+                .setValue(databasePassword)
+                .setEnvironmentName("production")
+                .setDescription("Application database password")
+                .build(),
+        Secret.class
+);
+
+Secret updated = client.secrets().modify(
+        "DATABASE_PASSWORD",
+        SecretUpdateParams.builder()
+                .setValue(rotatedPassword)
+                .build(),
+        Secret.class,
+        "production"
+);
+```
+
+Clear a secret's environment association explicitly:
+
+```java
+SecretUpdateParams changes = SecretUpdateParams.builder()
+        .clearEnvironment()
+        .build();
+```
+
+Secret values and descriptions are serialized into the JSON request body, not
+the CLI command line.
+
+## Environments
+
+```java
+import locker.model.Environment;
+import locker.param.environment.EnvironmentCreateParams;
+
+Environment environment = client.environments().create(
+        EnvironmentCreateParams.builder()
+                .setName("production")
+                .setExternalUrl("https://example.com")
+                .setDescription("Production environment")
+                .build(),
+        Environment.class
+);
+```
+
+The environment service also provides `retrieve`, `list`, and `modify`.
+
+## Per-request options
+
+Every service method accepts a `RequestOptions` overload. Per-request values
+override client values and are defensively copied:
+
+```java
+import locker.net.RequestOptions;
+
 RequestOptions requestOptions = RequestOptions.builder()
-        .setAccessKeyId("access_key_id")
-        .setSecretAccessKey("secret_access_key")
-        .build();
-Secret secret = client.secrets().retrieve("java_key_1", requestOptions, Secret.class);
-```
-
-### Per-request Object type
-
-The Java SDK can return objects of two types for each request: either a String or a LockerObject.
-
-```java
-// return Secret type
-Secret secret = client.secrets().retrieve("java_key_1", requestOptions, Secret.class);
-// return String
-String secretValue = client.secrets().retrieve("java_key_1", requestOptions, String.class);
-```
-
-Now, you can use SDK to get or set values:
-
-### List secrets
-
-```java
-String secrets = client.secrets().list(String.class);
-
-/**
- *  return a list of secrets
- * */
-Class<? super LockerCollection<Secret>> type = new TypeToken<LockerCollection<Secret>>() {
-}.getRawType();
-LockerCollection<Secret> secretList = (LockerCollection<Secret>) client.secrets().list(type);
-```
-
-### Get a secret by secret key
-
-```java
-// Get a secret by secret key
-Secret secret = client.secrets().retrieve("java_key_1", Secret.class);
-String secretValue = client.secrets().retrieve("java_key_1", String.class);
-
-// Get a secret by secret key and specific environment name
-Secret secret = client.secrets().retrieve("java_key_1", Secret.class, "env_name");
-String secret = client.secrets().retrieve("java_key_1", String.class, "env_name");
-```
-
-### Create new secret
-
-```java
-SecretCreateParams createParams = new SecretCreateParams.Builder()
-        .setKey("key")
-        .setValue("value")
-        .setDescription("description")
-        .build();
-Secret newSecret = client.secrets().create(createParams, Secret.class);
-```
-
-### Update a secret
-
-```java
-SecretUpdateParams updateParams = new SecretUpdateParams.Builder()
-        .setKey("your_update_secret_key")
-        .setValue("your_update_secret_value")
-        .setDescription("your_update_secret_description")
+        .setApiBase(regionalApiBase)
+        .setHeaders(regionalHeaders)
         .build();
 
-// Update a secret by secret key
-Secret updatedSecret = client.secrets().modify("your_secret_key", updateParams, Secret.class);
-
-// Update a secret by secret key and specific environment name
-Secret updatedSecret = client.secrets().modify("your_secret_key", updateParams, Secret.class, "your_secret_env_name");
+String value = client.secrets().retrieve(
+        "DATABASE_PASSWORD",
+        requestOptions,
+        String.class
+);
 ```
 
-### List environments
+## Error handling
+
+All SDK exceptions extend `LockerError`. Operation errors are mapped from the
+protocol's numeric error code and retain the safe structured details:
 
 ```java
-Class<? super LockerCollection<Environment>> type = new TypeToken<LockerCollection<Environment>>() {
-}.getRawType();
-LockerCollection<Environment> listEnvs = (LockerCollection<Environment>) client.environments().list(type);
-
-String envs = client.environments().list(String.class);
-```
-
-### Get an environment object by name
-
-```java
-Environment environment = client.environments().retrieve("your_env_name", Environment.class);
-
-```
-
-### Create new environment
-
-```java
-EnvironmentCreateParams createEnvParams = EnvironmentCreateParams.builder()
-        .setName("your_env_name")
-        .setExternalUrl("your_env_external_url")
-        .setDescription("your_env_description")
-        .build();
-Environment newEnv = client.environments().create(createEnvParams, Environment.class);
-```
-
-### Update an environment by name
-
-```java
-EnvironmentUpdateParams params = EnvironmentUpdateParams.builder()
-        .setName("your_update_env_name")
-        .setExternalUrl("your_update_env_external_url")
-        .setDescription("your_update_env_description")
-        .build();
-Environment updatedEnv = client.environments().modify("your_env_name", params, Environment.class);
-```
-
-### Error Handling
-
-Locker Secret SDK offers some kinds of errors. They can reflect external events, like invalid credentials, network
-interruptions, or code problems, like invalid API calls.
-
-If an immediate problem prevents a function from continuing, the SDK raises an exception. It’s a best practice to catch
-and handle exceptions. To catch an exception, use Java’s `try/catch` syntax. Catch `LockerError` or its
-subclasses to handle Locker-specific exceptions only. Each subclass represents a different kind of exception. When you
-catch an exception, you can use its class to choose a response.
-
-Example:
-
-```java
-
-SecretCreateParams params = SecretCreateParams.builder()
-  .setValue("your_secret_value")
-  .setKey("your_secret_key")
-  .setDescription("your_secret_description")
-  .build();
+import locker.exception.LockerError;
+import locker.exception.ResourceNotFoundError;
 
 try {
-  Secret newSecret = client.secrets().create(params,Secret.class);
-} catch (LockerError e) {
-  e.printStackTrace();
+    String value = client.secrets().retrieve("DATABASE_PASSWORD", String.class);
+} catch (ResourceNotFoundError error) {
+    // Handle a missing secret explicitly.
+} catch (LockerError error) {
+    Integer protocolCode = error.getProtocolCode();
+    String requestId = error.getRequestId();
+    Boolean retryable = error.getRetryable();
 }
 ```
 
-In the SDK, error objects belong to LockerError and its subclasses. Use the documentation for each class
-for advice about how to respond.
+Authentication, permission, protocol, storage, network, and server failures
+fail closed. The SDK never places raw request bodies, responses, or CLI stderr
+in exception messages.
 
-| Name                    | Class                 | Description                                                                                                                                        |
-|-------------------------|-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
-| Authentication Error    | AuthenticationError   | Invalid `access_client_id` or `invalid secret_access_key`                                                                                          |
-| Permission Denied Error | PermissionDeniedError | Your credential does not have enough permission to execute this operation                                                                          |
-| RateLimit Error         | RateLimitError        | Too many requests                                                                                                                                  |
-| API Error               | APIError              | You made an API call with the wrong parameters, in the wrong state, or in an invalid way or Something went wrong on Locker’s end (These are rare.) |
-| CLI Run Error           | CliRunError           | The encryption/decryption binary runs errors by invalid local data, process interruptions, or invalid `secret_access_key`                          |
+## Protocol and process safety
 
-## Examples
+Before the first vault operation, the SDK negotiates `system.capabilities` and
+requires Locker SDK protocol v1, the eight base vault methods plus
+`system.capabilities`, and positive request/response byte limits. Paginated
+list methods are additive capabilities: an older compatible CLI can still run
+base operations, while a `listPage` call fails locally when its method was not
+advertised. Each request:
 
-See the project's [examples' folder][examples' folder] for more examples.
+- starts the binary with the single argument `sdk`;
+- writes one UTF-8 JSON-RPC request to stdin and closes it;
+- reads stdout and stderr separately with bounded buffers and applies the
+  smaller of the local output limit and the CLI-advertised response limit;
+- applies a bounded timeout and terminates the process tree on failure;
+- validates the response envelope, request ID, required types, and protocol
+  version.
 
 ## Development
 
-To run the tests:
+Run the hermetic unit and protocol tests:
 
-```sh
-mvn test
+```shell
+mvn --strict-checksums test
 ```
 
-You can run particular tests by passing `--tests Class#method`. Make sure you
-use the fully qualified class name. For example:
+Build the binary, source, and Javadoc artifacts:
 
-```sh
-mvn -Dtest=locker.model.SecretTest test
+```shell
+mvn --strict-checksums package
 ```
 
-The library uses [Project Lombok][lombok]. While it is not a requirement, you
-might want to install a [plugin][lombok-plugins] for your favorite IDE to
-facilitate development.
+GitLab uses an immutable official Maven/Temurin 11 image digest. Maven strict
+checksum mode and the Enforcer rule reject corrupted repository responses and
+snapshot dependencies; the content-keyed `.m2` cache is an optimization, not
+a trust source. CI does not install build tools through `apt`, `apk`, `curl`,
+or `wget`.
 
+Run the optional protocol negotiation check against a real local CLI:
 
-[functional-tests]: https://git.cystack.org/locker/secrets-sdk-java/-/tree/dev/src/test/java/locker/functional
+```shell
+LOCKER_INTEGRATION_CLI=/path/to/locker \
+  mvn -Dtest=locker.net.RealCliConformanceTest test
+```
 
-[examples' folder]: https://git.cystack.org/locker/secrets-sdk-java/-/tree/dev/src/test/java/locker/functional
+Live functional tests require `LOCKER_TEST_ACCESS_KEY_ID` and
+`LOCKER_TEST_SECRET_ACCESS_KEY`. They are intentionally separate from the
+default unit-test suite; never commit real credentials to test sources.
 
-[gson]: https://github.com/google/gson
+## License
 
-[lombok]: https://projectlombok.org
-
-[lombok-plugins]: https://projectlombok.org/setup/overview
-
-[proguard]: https://www.guardsquare.com/en/products/proguard
-
-[spotless]: https://github.com/diffplug/spotless
-
-[locker]: https://locker.io/
-
-<!--
-# vim: set tw=79:
--->
+Apache License 2.0.

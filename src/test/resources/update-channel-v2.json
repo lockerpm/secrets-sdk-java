@@ -1,0 +1,77 @@
+{
+  "key_id": "locker-cli-release-v1",
+  "latest_payload": {
+    "manifest": {
+      "path": "2.0.7/manifest.json",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "size": 4096
+    },
+    "product": "locker-cli",
+    "schema": "io.locker.cli.update-latest",
+    "schema_version": 2,
+    "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "version": "2.0.7"
+  },
+  "manifest_payload": {
+    "artifacts": [
+      {
+        "arch": "amd64",
+        "filename": "locker-linux-amd64",
+        "os": "linux",
+        "path": "2.0.7/locker-linux-amd64",
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "signature_path": "2.0.7/locker-linux-amd64.sig",
+        "size": 10000000
+      },
+      {
+        "arch": "arm64",
+        "filename": "locker-linux-arm64",
+        "os": "linux",
+        "path": "2.0.7/locker-linux-arm64",
+        "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "signature_path": "2.0.7/locker-linux-arm64.sig",
+        "size": 10000001
+      },
+      {
+        "arch": "amd64",
+        "filename": "locker-darwin-amd64",
+        "os": "darwin",
+        "path": "2.0.7/locker-darwin-amd64",
+        "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "signature_path": "2.0.7/locker-darwin-amd64.sig",
+        "size": 10000002
+      },
+      {
+        "arch": "arm64",
+        "filename": "locker-darwin-arm64",
+        "os": "darwin",
+        "path": "2.0.7/locker-darwin-arm64",
+        "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "signature_path": "2.0.7/locker-darwin-arm64.sig",
+        "size": 10000003
+      },
+      {
+        "arch": "amd64",
+        "filename": "locker-windows-amd64.exe",
+        "os": "windows",
+        "path": "2.0.7/locker-windows-amd64.exe",
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "signature_path": "2.0.7/locker-windows-amd64.exe.sig",
+        "size": 10000004
+      }
+    ],
+    "product": "locker-cli",
+    "protocol": {
+      "max_version": 1,
+      "min_version": 1,
+      "name": "locker.sdk",
+      "transport": "json-rpc-2.0-stdio"
+    },
+    "schema": "io.locker.cli.update-manifest",
+    "schema_version": 2,
+    "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "version": "2.0.7"
+  },
+  "public_key_encoding": "base64url-no-padding(raw-ed25519-32-bytes)",
+  "signature_encoding": "base64url-no-padding(raw-ed25519-64-bytes)"
+}

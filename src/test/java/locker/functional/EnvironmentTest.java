@@ -1,6 +1,5 @@
 package locker.functional;
 
-import locker.BaseLockerTest;
 import locker.exception.LockerError;
 import locker.model.Environment;
 import locker.param.environment.EnvironmentCreateParams;
@@ -10,7 +9,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-public class EnvironmentTest extends BaseLockerTest {
+public class EnvironmentTest extends BaseFunctionalTest {
   String envNameTest = "env_java_2";
   String externalUrl = "env_external_url_test";
 
@@ -21,13 +20,13 @@ public class EnvironmentTest extends BaseLockerTest {
       .setDescription("")
       .setExternalUrl(externalUrl)
       .build();
-    Environment env = mockClient.environments().create(params, Environment.class);
+    Environment env = client.environments().create(params, Environment.class);
     assertEquals(env.getName(), envNameTest);
   }
 
   @Test
   public void testRetrieve() throws LockerError {
-    Environment env = mockClient.environments().retrieve(envNameTest, Environment.class);
+    Environment env = client.environments().retrieve(envNameTest, Environment.class);
     assertEquals(env.getName(), envNameTest);
   }
 
@@ -36,14 +35,14 @@ public class EnvironmentTest extends BaseLockerTest {
     EnvironmentUpdateParams params = EnvironmentUpdateParams.builder()
       .setExternalUrl("new external url")
       .setDescription("new des").build();
-    Environment env = mockClient.environments().modify(envNameTest, params, Environment.class);
+    Environment env = client.environments().modify(envNameTest, params, Environment.class);
     assertEquals(env.getName(), envNameTest);
     assertEquals(env.getDescription(), "new des");
   }
 
   @Test
   public void testList() throws LockerError {
-    String envList = mockClient.environments().list(String.class);
+    String envList = client.environments().list(String.class);
     assertNotNull(envList);
   }
 

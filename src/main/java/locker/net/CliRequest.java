@@ -1,13 +1,14 @@
 package locker.net;
 
-
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 
 public class CliRequest extends BaseCliRequest {
-    private Map<String, Object> params;
+    private final Map<String, Object> params;
 
     private CliRequest(
             CliResource.RequestMethod method,
@@ -16,7 +17,11 @@ public class CliRequest extends BaseCliRequest {
             List<String> usage,
             Map<String, Object> params) {
         super(method, cli, options, usage);
-        this.params = params;
+        this.params = params == null
+                ? Collections.emptyMap()
+                : Collections.unmodifiableMap(
+                        new LinkedHashMap<>(params)
+                );
     }
 
     public CliRequest(
@@ -30,9 +35,7 @@ public class CliRequest extends BaseCliRequest {
 
     public CliRequest addUsage(String usage) {
         List<String> newUsage = new ArrayList<>();
-        if (this.getUsage() != null) {
-            newUsage.addAll(this.getUsage());
-        }
+        newUsage.addAll(this.getUsage());
         newUsage.add(usage);
         return new CliRequest(
                 this.getMethod(),

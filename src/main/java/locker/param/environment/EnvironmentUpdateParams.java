@@ -29,20 +29,7 @@ public class EnvironmentUpdateParams extends CliRequestParams {
 
     @Override
     public ArrayList<String> buildCliOptions() {
-        ArrayList<String> cliOptions = new ArrayList<>();
-        if (this.name != null && !this.name.isEmpty()) {
-            cliOptions.add("--new-name");
-            cliOptions.add(this.name );
-        }
-        if (this.externalUrl != null && !this.externalUrl.isEmpty()) {
-            cliOptions.add("--new-url");
-            cliOptions.add(this.externalUrl);
-        }
-        if (this.description != null && !this.description.isEmpty()) {
-            cliOptions.add("--new-description");
-            cliOptions.add( this.description );
-        }
-        return cliOptions;
+        return new ArrayList<>();
     }
 
     public static class Builder {

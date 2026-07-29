@@ -1,13 +1,15 @@
 package locker.service;
 
 import locker.exception.LockerError;
+import locker.model.EnvironmentPage;
 import locker.net.*;
 import locker.param.environment.EnvironmentCreateParams;
 import locker.param.environment.EnvironmentListParams;
+import locker.param.environment.EnvironmentListPageParams;
 import locker.param.environment.EnvironmentRetrieveParams;
 import locker.param.environment.EnvironmentUpdateParams;
 
-import java.lang.reflect.Array;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -53,8 +55,6 @@ public class EnvironmentService extends ApiService {
         List<String> cli = new ArrayList<String>();
         cli.add("environment");
         cli.add("create");
-        ArrayList<String> cliParamOptions = params.buildCliOptions();
-        cli.addAll(cliParamOptions);
         CliRequest request = new CliRequest(
                 CliResource.RequestMethod.POST,
                 cli,
@@ -62,6 +62,41 @@ public class EnvironmentService extends ApiService {
                 options
         );
         return this.call(request, typeToken);
+    }
+
+    /**
+     * Returns one bounded page of environments.
+     */
+    public EnvironmentPage listPage() throws LockerError {
+        return listPage(null, null);
+    }
+
+    /**
+     * Returns one bounded page of environments.
+     */
+    public EnvironmentPage listPage(
+            EnvironmentListPageParams params
+    ) throws LockerError {
+        return listPage(params, null);
+    }
+
+    /**
+     * Returns one bounded page of environments.
+     */
+    public EnvironmentPage listPage(
+            EnvironmentListPageParams params,
+            RequestOptions options
+    ) throws LockerError {
+        List<String> cli = new ArrayList<>();
+        cli.add("environment");
+        cli.add("list_page");
+        CliRequest request = new CliRequest(
+                CliResource.RequestMethod.GET,
+                cli,
+                CliRequestParams.paramsToMap(params),
+                options
+        );
+        return this.call(request, EnvironmentPage.class);
     }
 
     public <T> T list(Class<T> typeToken) throws LockerError {
@@ -73,6 +108,18 @@ public class EnvironmentService extends ApiService {
     }
 
     public <T> T list(EnvironmentListParams params, RequestOptions options, Class<T> typeToken) throws LockerError {
+        return this.list(params, options, (Type) typeToken);
+    }
+
+    public <T> T list(Type typeToken) throws LockerError {
+        return this.list(null, null, typeToken);
+    }
+
+    public <T> T list(
+            EnvironmentListParams params,
+            RequestOptions options,
+            Type typeToken
+    ) throws LockerError {
         List<String> cli = new ArrayList<String>();
         cli.add("environment");
         cli.add("list");
@@ -105,9 +152,9 @@ public class EnvironmentService extends ApiService {
         cli.add("update");
         cli.add("--name");
         cli.add(name);
-        ArrayList<String> cliParamOptions = params.buildCliOptions();
-        cli.addAll(cliParamOptions);
-
+        if (params == null) {
+            params = EnvironmentUpdateParams.builder().setName(name).build();
+        }
         CliRequest request = new CliRequest(
                 CliResource.RequestMethod.UPDATE,
                 cli,

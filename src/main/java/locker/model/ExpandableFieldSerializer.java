@@ -1,6 +1,7 @@
 package locker.model;
 
 import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
 import com.google.gson.JsonPrimitive;
 import com.google.gson.JsonSerializationContext;
 import com.google.gson.JsonSerializer;
@@ -19,7 +20,7 @@ public class ExpandableFieldSerializer implements JsonSerializer<ExpandableField
         } else if (src.getId() != null) {
             return new JsonPrimitive(src.getId());
         } else {
-            return null;
+            return JsonNull.INSTANCE;
         }
     }
 }

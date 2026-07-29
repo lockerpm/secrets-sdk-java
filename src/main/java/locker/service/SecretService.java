@@ -1,12 +1,15 @@
 package locker.service;
 
 import locker.exception.LockerError;
+import locker.model.SecretPage;
 import locker.net.*;
 import locker.param.secret.SecretCreateParams;
 import locker.param.secret.SecretListParams;
+import locker.param.secret.SecretListPageParams;
 import locker.param.secret.SecretRetrieveParams;
 import locker.param.secret.SecretUpdateParams;
 
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -85,9 +88,6 @@ public class SecretService extends ApiService {
         cli.add("secret");
         cli.add("create");
 
-        ArrayList<String> cliParamOptions = params.buildCliOptions();
-        cli.addAll(cliParamOptions);
-
         CliRequest request = new CliRequest(
                 CliResource.RequestMethod.POST,
                 cli,
@@ -105,7 +105,32 @@ public class SecretService extends ApiService {
         return this.list(params, null, typeToken);
     }
 
+    public <T> T list(
+            String environmentName,
+            Class<T> typeToken
+    ) throws LockerError {
+        return this.list(
+                SecretListParams.builder()
+                        .setEnvironmentName(environmentName)
+                        .build(),
+                null,
+                typeToken
+        );
+    }
+
     public <T> T list(SecretListParams params, RequestOptions options, Class<T> typeToken) throws LockerError {
+        return this.list(params, options, (Type) typeToken);
+    }
+
+    public <T> T list(Type typeToken) throws LockerError {
+        return this.list(null, null, typeToken);
+    }
+
+    public <T> T list(
+            SecretListParams params,
+            RequestOptions options,
+            Type typeToken
+    ) throws LockerError {
         List<String> cli = new ArrayList<String>();
         cli.add("secret");
         cli.add("list");
@@ -117,6 +142,41 @@ public class SecretService extends ApiService {
         );
 
         return this.call(request, typeToken);
+    }
+
+    /**
+     * Returns one bounded page of secrets.
+     */
+    public SecretPage listPage() throws LockerError {
+        return listPage(null, null);
+    }
+
+    /**
+     * Returns one bounded page of secrets.
+     */
+    public SecretPage listPage(
+            SecretListPageParams params
+    ) throws LockerError {
+        return listPage(params, null);
+    }
+
+    /**
+     * Returns one bounded page of secrets.
+     */
+    public SecretPage listPage(
+            SecretListPageParams params,
+            RequestOptions options
+    ) throws LockerError {
+        List<String> cli = new ArrayList<>();
+        cli.add("secret");
+        cli.add("list_page");
+        CliRequest request = new CliRequest(
+                CliResource.RequestMethod.GET,
+                cli,
+                CliRequestParams.paramsToMap(params),
+                options
+        );
+        return this.call(request, SecretPage.class);
     }
 
     public <T> T modify(String name, Class<T> typeToken) throws LockerError {
@@ -138,23 +198,18 @@ public class SecretService extends ApiService {
         cli.add("update");
         cli.add("--key");
         cli.add(name);
-        if (params == null) {
-            params = SecretUpdateParams
+        SecretUpdateParams effectiveParams = params;
+        if (effectiveParams == null) {
+            effectiveParams = SecretUpdateParams
                     .builder().
                     setKey(name)
                     .build();
         }
-        String newKey = params.getKey();
-        if (newKey == null) {
-            params.setKey(name);
-        }
 
-        ArrayList<String> cliParamOptions = params.buildCliOptions();
-        cli.addAll(cliParamOptions);
         CliRequest request = new CliRequest(
                 CliResource.RequestMethod.UPDATE,
                 cli,
-                CliRequestParams.paramsToMap(params),
+                CliRequestParams.paramsToMap(effectiveParams),
                 requestOptions
         );
         return this.call(request, typeToken);
@@ -182,13 +237,14 @@ public class SecretService extends ApiService {
         cli.add("--environment");
         cli.add(envName);
 
-        ArrayList<String> cliParamOptions = params.buildCliOptions();
-        cli.addAll(cliParamOptions);
+        SecretUpdateParams effectiveParams = params == null
+                ? SecretUpdateParams.builder().setKey(name).build()
+                : params;
 
         CliRequest request = new CliRequest(
                 CliResource.RequestMethod.UPDATE,
                 cli,
-                CliRequestParams.paramsToMap(params),
+                CliRequestParams.paramsToMap(effectiveParams),
                 requestOptions
         );
         return this.call(request, typeToken);

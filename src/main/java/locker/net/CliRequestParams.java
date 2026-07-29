@@ -11,7 +11,7 @@ public abstract class CliRequestParams {
      * {@code @SerializedName(ApiRequestParams.EXTRA_PARAMS_KEY)}. Logic to handle this is in {@link
      * CliRequestParamsConverter}.
      */
-    public static final String EXTRA_PARAMS_KEY = "_stripe_java_extra_param_key";
+    public static final String EXTRA_PARAMS_KEY = "_locker_java_extra_param_key";
 
     /**
      * Converter mapping typed API request parameters into an untyped map.
@@ -19,9 +19,8 @@ public abstract class CliRequestParams {
     private static final CliRequestParamsConverter PARAMS_CONVERTER = new CliRequestParamsConverter();
 
     /**
-     * Interface implemented by all enum parameter to get the actual string value that Stripe API
-     * expects. Internally, it used in custom serialization {@link CliRequestParamsConverter}
-     * converting empty string enum to null.
+     * Interface implemented by enum parameters to expose their serialized
+     * value. The request converter maps an empty enum value to {@code null}.
      */
     public interface EnumParam {
         String getValue();
@@ -48,5 +47,13 @@ public abstract class CliRequestParams {
         return params.toMap();
     }
 
-    public abstract ArrayList<String> buildCliOptions();
+    /**
+     * Legacy human-CLI option rendering.
+     *
+     * SDK transports serialize parameters into the protocol request body, so
+     * this compatibility method always returns an empty list.
+     */
+    public ArrayList<String> buildCliOptions() {
+        return new ArrayList<>();
+    }
 }

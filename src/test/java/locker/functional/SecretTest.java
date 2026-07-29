@@ -1,6 +1,5 @@
 package locker.functional;
 
-import locker.BaseLockerTest;
 import locker.exception.LockerError;
 import locker.model.Secret;
 import locker.param.secret.SecretCreateParams;
@@ -11,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 
-public class SecretTest extends BaseLockerTest {
+public class SecretTest extends BaseFunctionalTest {
   String testKeyName = "key_"+System.currentTimeMillis();
   String testValue = "test value";
   @Test
@@ -21,7 +20,7 @@ public class SecretTest extends BaseLockerTest {
       .setKey(testKeyName)
       .setValue(testValue)
       .build();
-    Secret newSecret = mockClient.secrets().create(createParams, Secret.class);
+    Secret newSecret = client.secrets().create(createParams, Secret.class);
     assertNotNull(newSecret);
     assertEquals(newSecret.getKey(), testKeyName);
   }
@@ -34,7 +33,7 @@ public class SecretTest extends BaseLockerTest {
       .setKey(newName)
       .setValue("newValue")
       .build();
-    Secret updatedSecret = mockClient.secrets().modify(currentName, updateParams, Secret.class);
+    Secret updatedSecret = client.secrets().modify(currentName, updateParams, Secret.class);
     assertEquals(updatedSecret.getKey(), newName);
   }
 
@@ -42,13 +41,13 @@ public class SecretTest extends BaseLockerTest {
   public void testRetrieve() throws LockerError {
     String name = "test_1";
     String envName = "env_java_1";
-    Secret secret = mockClient.secrets().retrieve(name, Secret.class, envName);
+    Secret secret = client.secrets().retrieve(name, Secret.class, envName);
     assertNotNull(secret);
     assertEquals(name, secret.getKey());
   }
   @Test
   public void testList()throws LockerError{
-    String secretList = mockClient.secrets().list(String.class);
+    String secretList = client.secrets().list(String.class);
     assertNotNull(secretList);
   }
 }

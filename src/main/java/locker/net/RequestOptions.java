@@ -5,7 +5,10 @@ import locker.exception.LockerError;
 import locker.model.LockerObjectInterface;
 import lombok.Getter;
 
+import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -36,7 +39,7 @@ public class RequestOptions {
         this.accessKeyId = accessKeyId;
         this.secretAccessKey = secretAccessKey;
         this.apiBase = apiBase;
-        this.headers = headers;
+        this.headers = immutableHeaders(headers);
     }
 
     public static RequestOptionsBuilder builder() {
@@ -45,11 +48,24 @@ public class RequestOptions {
 
     public static Boolean getIsJsonFromType(Type typeToken) throws LockerError {
 
-        if (typeToken.equals(String.class)) {
+        if (typeToken == null) {
+            throw new ApiConnectionError("Response type must not be null");
+        }
+
+        Type rawType = typeToken;
+        if (typeToken instanceof ParameterizedType) {
+            rawType = ((ParameterizedType) typeToken).getRawType();
+        }
+        if (!(rawType instanceof Class<?>)) {
+            throw new ApiConnectionError("Unsupported response type");
+        }
+
+        Class<?> responseClass = (Class<?>) rawType;
+        if (responseClass.equals(String.class)) {
             return false;
-        } else if (LockerObjectInterface.class.isAssignableFrom((Class<?>) typeToken)) {
+        } else if (LockerObjectInterface.class.isAssignableFrom(responseClass)) {
             return true;
-        } else if (List.class.isAssignableFrom((Class<?>) typeToken)) {
+        } else if (List.class.isAssignableFrom(responseClass)) {
             return true;
         } else {
 
@@ -112,21 +128,34 @@ public class RequestOptions {
      * GET request option from global or per-request options
      */
     static RequestOptions merge(LockerResponseGetterOptions clientOptions, RequestOptions options) {
+        String clientAccessKeyId = clientOptions == null ? null : clientOptions.getAccessKeyId();
+        String clientSecretAccessKey = clientOptions == null ? null : clientOptions.getSecretAccessKey();
+        String clientApiBase = clientOptions == null ? null : clientOptions.getApiBase();
+        Map<String, String> clientHeaders = clientOptions == null ? null : clientOptions.getHeaders();
 
         if (options == null) {
             return new RequestOptions(
-                    clientOptions.getAccessKeyId(),
-                    clientOptions.getSecretAccessKey(),
-                    clientOptions.getApiBase(),
-                    clientOptions.getHeaders()
+                    clientAccessKeyId,
+                    clientSecretAccessKey,
+                    clientApiBase,
+                    clientHeaders
             );
         }
         return new RequestOptions(
-                options.getAccessKeyId() != null ? options.getAccessKeyId() : clientOptions.getAccessKeyId(),
-                options.getSecretAccessKey() != null ? options.getSecretAccessKey() : clientOptions.getSecretAccessKey(),
-                options.getApiBase() != null ? options.getApiBase() : clientOptions.getApiBase(),
-                options.getHeaders() != null ? options.getHeaders() : clientOptions.getHeaders()
+                options.getAccessKeyId() != null ? options.getAccessKeyId() : clientAccessKeyId,
+                options.getSecretAccessKey() != null ? options.getSecretAccessKey() : clientSecretAccessKey,
+                options.getApiBase() != null ? options.getApiBase() : clientApiBase,
+                options.getHeaders() != null ? options.getHeaders() : clientHeaders
         );
+    }
+
+    private static Map<String, String> immutableHeaders(
+            Map<String, String> headers
+    ) {
+        if (headers == null) {
+            return null;
+        }
+        return Collections.unmodifiableMap(new LinkedHashMap<>(headers));
     }
 
 }

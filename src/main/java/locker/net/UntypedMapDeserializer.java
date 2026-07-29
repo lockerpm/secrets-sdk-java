@@ -5,7 +5,11 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Deserializer to convert JSON object into an untyped map. While we strive to provide more typed
@@ -14,7 +18,7 @@ import java.util.*;
  */
 public class UntypedMapDeserializer {
   /** Strategy for this deserializer. */
-  private Strategy strategy;
+  private final Strategy strategy;
 
   /**
    * Strategy to deserialize a JSON element, allowing for custom interactions between the
@@ -107,13 +111,7 @@ public class UntypedMapDeserializer {
     } else if (element.isJsonArray()) {
       return deserializeJsonArray(element.getAsJsonArray());
     } else {
-      System.err.println(
-          "Unknown JSON element type for element "
-              + element
-              + ". "
-              + "If you're seeing this message, it's probably a bug in the Stripe Java "
-              + "library. Please contact us by email at support@stripe.com.");
-      return null;
+      throw new IllegalArgumentException("Unsupported JSON element type");
     }
   }
 

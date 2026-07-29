@@ -21,10 +21,10 @@ public class Secret extends CliResource implements HasId {
     @SerializedName("revision_date")
     Float revisionDate;
 
-    @SerializedName("update_date")
+    @SerializedName(value = "updated_date", alternate = {"update_date"})
     Float updateDate;
 
-    @SerializedName("delete_date")
+    @SerializedName(value = "deleted_date", alternate = {"delete_date"})
     Float deleteDate;
 
     @SerializedName("last_use_date")
@@ -50,4 +50,19 @@ public class Secret extends CliResource implements HasId {
 
     @SerializedName("hash")
     String hash;
+
+    /**
+     * Returns a diagnostic representation that never includes the secret value.
+     */
+    @Override
+    public String toString() {
+        return String.format(
+                "<%s@%s id=%s key=%s environment=%s value=[REDACTED]>",
+                this.getClass().getName(),
+                System.identityHashCode(this),
+                this.id,
+                this.key,
+                this.environmentName
+        );
+    }
 }

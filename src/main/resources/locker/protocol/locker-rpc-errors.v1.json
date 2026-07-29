@@ -1,0 +1,416 @@
+{
+  "schema_version": 1,
+  "protocol": "locker.sdk/1",
+  "unknown_server_code_policy": {
+    "minimum": -32099,
+    "maximum": -32000,
+    "sdk_error": "OperationError",
+    "message": "the Locker operation failed",
+    "preserve_retryable": true
+  },
+  "optional_metadata": {
+    "retry_after_seconds": {
+      "rpc_code": -32029,
+      "minimum": 0,
+      "maximum": 86400
+    },
+    "server_request_id": {
+      "minimum_length": 16,
+      "maximum_length": 128,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    }
+  },
+  "errors": [
+    {
+      "rpc_code": -32700,
+      "kind": "parse_error",
+      "message": "the Locker CLI returned invalid JSON",
+      "retryable": false,
+      "sdk_error": "ProtocolError"
+    },
+    {
+      "rpc_code": -32600,
+      "kind": "invalid_request",
+      "message": "the Locker CLI rejected the request envelope",
+      "retryable": false,
+      "sdk_error": "ProtocolError"
+    },
+    {
+      "rpc_code": -32601,
+      "kind": "method_not_found",
+      "message": "the requested Locker operation is not supported",
+      "retryable": false,
+      "sdk_error": "ProtocolError"
+    },
+    {
+      "rpc_code": -32602,
+      "kind": "invalid_params",
+      "message": "the Locker request parameters are invalid",
+      "retryable": false,
+      "sdk_error": "ProtocolError"
+    },
+    {
+      "rpc_code": -32603,
+      "kind": "internal_protocol_error",
+      "message": "the Locker CLI encountered an internal protocol error",
+      "retryable": false,
+      "sdk_error": "ProtocolError"
+    },
+    {
+      "rpc_code": -32000,
+      "kind": "operation_error",
+      "message": "the Locker operation failed",
+      "retryable": false,
+      "sdk_error": "OperationError"
+    },
+    {
+      "rpc_code": -32000,
+      "kind": "function_error",
+      "message": "the Locker operation failed",
+      "retryable": false,
+      "sdk_error": "OperationError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32000,
+      "kind": "cancelled",
+      "message": "request cancelled",
+      "retryable": false,
+      "sdk_error": "OperationCancelledError"
+    },
+    {
+      "rpc_code": -32000,
+      "kind": "request_rejected",
+      "message": "the request is invalid",
+      "retryable": false,
+      "sdk_error": "RequestRejectedError"
+    },
+    {
+      "rpc_code": -32000,
+      "kind": "response_too_large",
+      "message": "protocol response exceeds the size limit",
+      "retryable": false,
+      "sdk_error": "ResponseTooLargeError"
+    },
+    {
+      "rpc_code": -32000,
+      "kind": "conflict",
+      "message": "the operation conflicts with current state",
+      "retryable": false,
+      "sdk_error": "ConflictError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32000,
+      "kind": "already_exists",
+      "message": "the requested resource already exists",
+      "retryable": false,
+      "sdk_error": "AlreadyExistsError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32000,
+      "kind": "duplicate_hash",
+      "message": "the requested resource already exists",
+      "retryable": false,
+      "sdk_error": "AlreadyExistsError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32000,
+      "kind": "secret_already_exists",
+      "message": "a secret with this key already exists",
+      "retryable": false,
+      "sdk_error": "AlreadyExistsError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32000,
+      "kind": "environment_already_exists",
+      "message": "an environment with this name already exists",
+      "retryable": false,
+      "sdk_error": "AlreadyExistsError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32000,
+      "kind": "validation_error",
+      "message": "the request is invalid",
+      "retryable": false,
+      "sdk_error": "ValidationError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32000,
+      "kind": "integrity_error",
+      "message": "stored data failed an integrity check",
+      "retryable": false,
+      "sdk_error": "IntegrityError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32000,
+      "kind": "transport_integrity_error",
+      "message": "transport integrity verification failed",
+      "retryable": false,
+      "sdk_error": "IntegrityError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32000,
+      "kind": "data_integrity_error",
+      "message": "data integrity verification failed",
+      "retryable": false,
+      "sdk_error": "IntegrityError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32000,
+      "kind": "data_error",
+      "message": "data integrity verification failed",
+      "retryable": false,
+      "sdk_error": "IntegrityError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32001,
+      "kind": "unauthorized",
+      "message": "authentication failed",
+      "retryable": false,
+      "sdk_error": "AuthenticationError",
+      "problem_code": "unauthorized",
+      "http_statuses": [401]
+    },
+    {
+      "rpc_code": -32001,
+      "kind": "invalid_secret_access_key",
+      "message": "authentication failed",
+      "retryable": false,
+      "sdk_error": "AuthenticationError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32003,
+      "kind": "forbidden",
+      "message": "you do not have permission to perform this operation",
+      "retryable": false,
+      "sdk_error": "PermissionDeniedError",
+      "problem_code": "forbidden",
+      "http_statuses": [403]
+    },
+    {
+      "rpc_code": -32003,
+      "kind": "permission_denied",
+      "message": "you do not have permission to perform this operation",
+      "retryable": false,
+      "sdk_error": "PermissionDeniedError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32004,
+      "kind": "secret_not_found",
+      "message": "the requested secret was not found",
+      "retryable": false,
+      "sdk_error": "NotFoundError",
+      "problem_code": "secret-not-found",
+      "http_statuses": [404]
+    },
+    {
+      "rpc_code": -32004,
+      "kind": "environment_not_found",
+      "message": "the requested environment was not found",
+      "retryable": false,
+      "sdk_error": "NotFoundError",
+      "problem_code": "environment-not-found",
+      "http_statuses": [400, 404, 422]
+    },
+    {
+      "rpc_code": -32004,
+      "kind": "not_found",
+      "message": "the requested resource was not found",
+      "retryable": false,
+      "sdk_error": "NotFoundError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32004,
+      "kind": "not_found_error",
+      "message": "the requested resource was not found",
+      "retryable": false,
+      "sdk_error": "NotFoundError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32009,
+      "kind": "conflict",
+      "message": "the operation conflicts with current state",
+      "retryable": false,
+      "sdk_error": "ConflictError",
+      "problem_code": "conflict",
+      "http_statuses": [409]
+    },
+    {
+      "rpc_code": -32009,
+      "kind": "already_exists",
+      "message": "the requested resource already exists",
+      "retryable": false,
+      "sdk_error": "AlreadyExistsError"
+    },
+    {
+      "rpc_code": -32009,
+      "kind": "secret_already_exists",
+      "message": "a secret with this key already exists",
+      "retryable": false,
+      "sdk_error": "AlreadyExistsError",
+      "problem_code": "secret-already-exists",
+      "http_statuses": [400, 409]
+    },
+    {
+      "rpc_code": -32009,
+      "kind": "environment_already_exists",
+      "message": "an environment with this name already exists",
+      "retryable": false,
+      "sdk_error": "AlreadyExistsError",
+      "problem_code": "environment-already-exists",
+      "http_statuses": [400, 409]
+    },
+    {
+      "rpc_code": -32022,
+      "kind": "validation_error",
+      "message": "the request is invalid",
+      "retryable": false,
+      "sdk_error": "ValidationError",
+      "problem_code": "validation-error",
+      "http_statuses": [400, 422]
+    },
+    {
+      "rpc_code": -32029,
+      "kind": "rate_limited",
+      "message": "too many requests; retry later",
+      "retryable": true,
+      "sdk_error": "RateLimitError",
+      "problem_code": "rate-limited",
+      "http_statuses": [429],
+      "retry_after_seconds": {
+        "minimum": 0,
+        "maximum": 86400
+      }
+    },
+    {
+      "rpc_code": -32029,
+      "kind": "rate_limit_error",
+      "message": "too many requests; retry later",
+      "retryable": true,
+      "sdk_error": "RateLimitError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32029,
+      "kind": "rate_limit",
+      "message": "too many requests; retry later",
+      "retryable": true,
+      "sdk_error": "RateLimitError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32050,
+      "kind": "network_error",
+      "message": "network request failed",
+      "retryable": true,
+      "sdk_error": "NetworkError"
+    },
+    {
+      "rpc_code": -32050,
+      "kind": "network_timeout",
+      "message": "network request timed out",
+      "retryable": true,
+      "sdk_error": "NetworkError"
+    },
+    {
+      "rpc_code": -32050,
+      "kind": "http_error",
+      "message": "network request failed",
+      "retryable": true,
+      "sdk_error": "NetworkError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32051,
+      "kind": "service_unavailable",
+      "message": "the service is temporarily unavailable",
+      "retryable": true,
+      "sdk_error": "ServerError",
+      "problem_code": "service-unavailable",
+      "http_statuses": [503]
+    },
+    {
+      "rpc_code": -32051,
+      "kind": "server_error",
+      "message": "the service is temporarily unavailable",
+      "retryable": true,
+      "sdk_error": "ServerError",
+      "legacy_alias": true
+    },
+    {
+      "rpc_code": -32051,
+      "kind": "internal_error",
+      "message": "the request could not be completed",
+      "retryable": false,
+      "sdk_error": "ServerError",
+      "problem_code": "internal-error",
+      "http_statuses": [500]
+    },
+    {
+      "rpc_code": -32060,
+      "kind": "database_error",
+      "message": "local storage operation failed",
+      "retryable": false,
+      "sdk_error": "StorageError"
+    },
+    {
+      "rpc_code": -32060,
+      "kind": "file_error",
+      "message": "local storage operation failed",
+      "retryable": false,
+      "sdk_error": "StorageError"
+    },
+    {
+      "rpc_code": -32060,
+      "kind": "path_error",
+      "message": "local storage operation failed",
+      "retryable": false,
+      "sdk_error": "StorageError"
+    },
+    {
+      "rpc_code": -32070,
+      "kind": "integrity_error",
+      "message": "stored data failed an integrity check",
+      "retryable": false,
+      "sdk_error": "IntegrityError",
+      "problem_code": "integrity-error",
+      "http_statuses": [500]
+    },
+    {
+      "rpc_code": -32070,
+      "kind": "transport_integrity_error",
+      "message": "transport integrity verification failed",
+      "retryable": false,
+      "sdk_error": "IntegrityError"
+    },
+    {
+      "rpc_code": -32070,
+      "kind": "data_integrity_error",
+      "message": "data integrity verification failed",
+      "retryable": false,
+      "sdk_error": "IntegrityError"
+    },
+    {
+      "rpc_code": -32070,
+      "kind": "data_error",
+      "message": "data integrity verification failed",
+      "retryable": false,
+      "sdk_error": "IntegrityError",
+      "legacy_alias": true
+    }
+  ]
+}

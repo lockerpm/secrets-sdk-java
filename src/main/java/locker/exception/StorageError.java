@@ -1,17 +1,16 @@
 package locker.exception;
 
-public class PermissionDeniedError extends LockerError {
+/**
+ * The Locker CLI failed a local encrypted-cache or storage operation.
+ */
+public final class StorageError extends CliRunError {
     private static final long serialVersionUID = 1L;
 
-    public PermissionDeniedError(String message, String jsonBody, String errorCode) {
-        super(message, jsonBody, errorCode);
-    }
-
-    protected PermissionDeniedError(String message) {
+    public StorageError(String message) {
         super(message);
     }
 
-    public PermissionDeniedError(
+    public StorageError(
             String message,
             String errorCode,
             int protocolCode,
@@ -21,7 +20,7 @@ public class PermissionDeniedError extends LockerError {
         this(message, errorCode, protocolCode, requestId, retryable, null);
     }
 
-    public PermissionDeniedError(
+    public StorageError(
             String message,
             String errorCode,
             int protocolCode,
@@ -31,13 +30,11 @@ public class PermissionDeniedError extends LockerError {
     ) {
         super(
                 message,
-                null,
                 errorCode,
                 protocolCode,
                 requestId,
                 retryable,
-                serverRequestId,
-                null
+                serverRequestId
         );
     }
 }

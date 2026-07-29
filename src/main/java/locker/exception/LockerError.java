@@ -8,6 +8,7 @@ public abstract class LockerError extends Exception {
     private final String jsonBody;
     private final Integer protocolCode;
     private final String requestId;
+    private final String serverRequestId;
     private final Boolean retryable;
 
     protected LockerError(String message, String jsonBody, String errorCode) {
@@ -35,11 +36,34 @@ public abstract class LockerError extends Exception {
             Boolean retryable,
             Throwable cause
     ) {
+        this(
+                message,
+                jsonBody,
+                errorCode,
+                protocolCode,
+                requestId,
+                retryable,
+                null,
+                cause
+        );
+    }
+
+    protected LockerError(
+            String message,
+            String jsonBody,
+            String errorCode,
+            Integer protocolCode,
+            String requestId,
+            Boolean retryable,
+            String serverRequestId,
+            Throwable cause
+    ) {
         super(message, cause);
         this.jsonBody = jsonBody;
         this.errorCode = errorCode;
         this.protocolCode = protocolCode;
         this.requestId = requestId;
+        this.serverRequestId = serverRequestId;
         this.retryable = retryable;
     }
 
@@ -79,6 +103,10 @@ public abstract class LockerError extends Exception {
 
     public String getRequestId() {
         return requestId;
+    }
+
+    public String getServerRequestId() {
+        return serverRequestId;
     }
 
     public Boolean getRetryable() {

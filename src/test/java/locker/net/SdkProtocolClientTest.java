@@ -6,10 +6,21 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import locker.LockerClient;
+import locker.exception.AlreadyExistsError;
 import locker.exception.ApiConnectionError;
 import locker.exception.ApiError;
+import locker.exception.ApiServerError;
 import locker.exception.CliRunError;
+import locker.exception.ConflictError;
+import locker.exception.IntegrityError;
+import locker.exception.OperationCancelledError;
+import locker.exception.ProtocolError;
+import locker.exception.RateLimitError;
 import locker.exception.ResourceNotFoundError;
+import locker.exception.RequestRejectedError;
+import locker.exception.ResponseTooLargeError;
+import locker.exception.StorageError;
+import locker.exception.ValidationError;
 import locker.model.LockerCollection;
 import locker.model.Secret;
 import locker.model.SecretPage;
@@ -58,6 +69,36 @@ public class SdkProtocolClientTest {
         );
 
         assertEquals("retrieved-value", value);
+    }
+
+    @Test
+    public void bindsTypedErrorsOnlyWhenAdvertised() throws Exception {
+        assertEquals(
+                "retrieved-value",
+                client("legacy-error-contract").secrets().retrieve(
+                        "DATABASE_PASSWORD",
+                        String.class,
+                        "production"
+                )
+        );
+        assertEquals(
+                "retrieved-value",
+                client("unknown-error-contract").secrets().retrieve(
+                        "DATABASE_PASSWORD",
+                        String.class,
+                        "production"
+                )
+        );
+        assertThrows(
+                ApiConnectionError.class,
+                () -> client("invalid-error-contract")
+                        .secrets()
+                        .retrieve(
+                                "DATABASE_PASSWORD",
+                                String.class,
+                                "production"
+                        )
+        );
     }
 
     @Test
@@ -187,8 +228,8 @@ public class SdkProtocolClientTest {
 
     @Test
     public void mapsResponseTooLargeAsNonRetryableOperationError() {
-        ApiError error = assertThrows(
-                ApiError.class,
+        ResponseTooLargeError error = assertThrows(
+                ResponseTooLargeError.class,
                 () -> client("response-too-large-error")
                         .secrets()
                         .retrieve("missing", Secret.class)
@@ -197,6 +238,185 @@ public class SdkProtocolClientTest {
         assertEquals(-32000, error.getProtocolCode());
         assertEquals("response_too_large", error.getErrorCode());
         assertEquals(false, error.getRetryable());
+        assertEquals(
+                "protocol response exceeds the size limit",
+                error.getUserMessage()
+        );
+        OperationCancelledError cancelled = assertThrows(
+                OperationCancelledError.class,
+                () -> client("operation-cancelled-error")
+                        .secrets()
+                        .retrieve("cancelled", Secret.class)
+        );
+        assertEquals(false, cancelled.getRetryable());
+        assertEquals("request cancelled", cancelled.getUserMessage());
+    }
+
+    @Test
+    public void mapsStableAndLegacyConflictTaxonomy() {
+        AlreadyExistsError duplicate = assertThrows(
+                AlreadyExistsError.class,
+                () -> client("already-exists")
+                        .secrets()
+                        .retrieve("duplicate", Secret.class)
+        );
+        assertEquals(-32009, duplicate.getProtocolCode());
+        assertEquals("secret_already_exists", duplicate.getErrorCode());
+        assertEquals(
+                "a secret with this key already exists",
+                duplicate.getUserMessage()
+        );
+        assertEquals(false, duplicate.getRetryable());
+        assertTrue(duplicate instanceof ConflictError);
+
+        assertThrows(
+                ConflictError.class,
+                () -> client("conflict")
+                        .secrets()
+                        .retrieve("conflict", Secret.class)
+        );
+        assertThrows(
+                ValidationError.class,
+                () -> client("validation-error")
+                        .secrets()
+                        .retrieve("invalid", Secret.class)
+        );
+        IntegrityError integrity = assertThrows(
+                IntegrityError.class,
+                () -> client("integrity-error")
+                        .secrets()
+                        .retrieve("integrity", Secret.class)
+        );
+        assertEquals(-32070, integrity.getProtocolCode());
+        assertEquals(false, integrity.getRetryable());
+        ProtocolError protocol = assertThrows(
+                ProtocolError.class,
+                () -> client("protocol-error")
+                        .secrets()
+                        .retrieve("invalid", Secret.class)
+        );
+        assertEquals(
+                "the Locker request parameters are invalid",
+                protocol.getUserMessage()
+        );
+        assertEquals(false, protocol.getRetryable());
+        StorageError storage = assertThrows(
+                StorageError.class,
+                () -> client("storage-error")
+                        .secrets()
+                        .retrieve("storage", Secret.class)
+        );
+        assertEquals(false, storage.getRetryable());
+        ApiServerError internal = assertThrows(
+                ApiServerError.class,
+                () -> client("internal-server-error")
+                        .secrets()
+                        .retrieve("internal", Secret.class)
+        );
+        assertEquals(
+                "the request could not be completed",
+                internal.getUserMessage()
+        );
+        assertEquals(false, internal.getRetryable());
+
+        assertThrows(
+                AlreadyExistsError.class,
+                () -> client("legacy-already-exists")
+                        .secrets()
+                        .retrieve("duplicate", Secret.class)
+        );
+        assertThrows(
+                ConflictError.class,
+                () -> client("legacy-conflict")
+                        .secrets()
+                        .retrieve("conflict", Secret.class)
+        );
+
+        RequestRejectedError generic = assertThrows(
+                RequestRejectedError.class,
+                () -> client("generic-request-rejected")
+                        .secrets()
+                        .retrieve("rejected", Secret.class)
+        );
+        assertEquals("the request is invalid", generic.getUserMessage());
+        assertEquals(false, generic.getRetryable());
+
+        ApiError future = assertThrows(
+                ApiError.class,
+                () -> client("future-server-error")
+                        .secrets()
+                        .retrieve("future", Secret.class)
+        );
+        assertEquals(ApiError.class, future.getClass());
+        assertEquals(-32099, future.getProtocolCode());
+        assertEquals(true, future.getRetryable());
+
+        ApiError futureKnownKind = assertThrows(
+                ApiError.class,
+                () -> client("future-known-kind")
+                        .secrets()
+                        .retrieve("future", Secret.class)
+        );
+        assertEquals(ApiError.class, futureKnownKind.getClass());
+        assertEquals(
+                "the Locker operation failed",
+                futureKnownKind.getUserMessage()
+        );
+        assertEquals(true, futureKnownKind.getRetryable());
+
+        assertThrows(
+                ProtocolError.class,
+                () -> client("outside-server-range")
+                        .secrets()
+                        .retrieve("future", Secret.class)
+        );
+        for (String mode : List.of(
+                "invalid-error-kind",
+                "invalid-error-message"
+        )) {
+            assertThrows(
+                    CliRunError.class,
+                    () -> client(mode)
+                            .secrets()
+                            .retrieve("invalid", Secret.class)
+            );
+        }
+    }
+
+    @Test
+    public void validatesAndExposesRateLimitRetryAfterSeconds() {
+        for (Map.Entry<String, Integer> fixture : Map.of(
+                "rate-limit-zero",
+                0,
+                "rate-limit-boundary",
+                86400
+        ).entrySet()) {
+            RateLimitError error = assertThrows(
+                    RateLimitError.class,
+                    () -> client(fixture.getKey())
+                            .secrets()
+                            .retrieve("limited", Secret.class)
+            );
+            assertEquals(
+                    fixture.getValue(),
+                    error.getRetryAfterSeconds()
+            );
+            assertEquals(true, error.getRetryable());
+        }
+
+        for (String mode : List.of(
+                "rate-limit-bool",
+                "rate-limit-negative",
+                "rate-limit-too-large",
+                "rate-limit-fraction"
+        )) {
+            assertThrows(
+                    ProtocolError.class,
+                    () -> client(mode)
+                            .secrets()
+                            .retrieve("limited", Secret.class)
+            );
+        }
     }
 
     @Test
@@ -209,7 +429,7 @@ public class SdkProtocolClientTest {
         );
 
         assertEquals(
-                "Locker resource was not found",
+                "the requested resource was not found",
                 error.getUserMessage()
         );
         assertFalse(

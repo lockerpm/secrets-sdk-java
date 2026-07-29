@@ -491,13 +491,26 @@ All SDK exceptions extend `LockerError`. Operation errors are mapped from the
 protocol's numeric error code and retain the safe structured details:
 
 ```java
+import locker.exception.AlreadyExistsError;
+import locker.exception.ConflictError;
 import locker.exception.LockerError;
-import locker.exception.ResourceNotFoundError;
+import locker.exception.RateLimitError;
+import locker.model.Secret;
+import locker.param.secret.SecretCreateParams;
 
 try {
-    String value = client.secrets().retrieve("DATABASE_PASSWORD", String.class);
-} catch (ResourceNotFoundError error) {
-    // Handle a missing secret explicitly.
+    client.secrets().create(
+            SecretCreateParams.builder()
+                    .setKey("PAYMENT_API_KEY")
+                    .setValue(paymentApiKey)
+                    .build(),
+            Secret.class
+    );
+} catch (AlreadyExistsError error) {
+    // PAYMENT_API_KEY already exists.
+    // AlreadyExistsError is also a ConflictError.
+} catch (RateLimitError error) {
+    Integer retryAfter = error.getRetryAfterSeconds(); // Optional 0..86400 hint.
 } catch (LockerError error) {
     Integer protocolCode = error.getProtocolCode();
     String requestId = error.getRequestId();
@@ -505,9 +518,45 @@ try {
 }
 ```
 
-Authentication, permission, protocol, storage, network, and server failures
-fail closed. The SDK never places raw request bodies, responses, or CLI stderr
-in exception messages.
+| Protocol code | Java exception | Canonical kind |
+| ---: | --- | --- |
+| `-32700` | `ProtocolError` | `parse_error` |
+| `-32600` | `ProtocolError` | `invalid_request` |
+| `-32601` | `ProtocolError` | `method_not_found` |
+| `-32602` | `ProtocolError` | `invalid_params` |
+| `-32603` | `ProtocolError` | `internal_protocol_error` |
+| `-32000` | `ApiError` and legacy subtypes | `operation_error`, `request_rejected`, `response_too_large`, `cancelled` |
+| `-32001` | `AuthenticationError` | `unauthorized`; legacy `invalid_secret_access_key` |
+| `-32003` | `PermissionDeniedError` | `forbidden`; legacy `permission_denied` |
+| `-32004` | `ResourceNotFoundError` | `secret_not_found`, `environment_not_found`; legacy `not_found_error` |
+| `-32009` | `ConflictError` / `AlreadyExistsError` | `conflict`, `secret_already_exists`, `environment_already_exists` |
+| `-32022` | `ValidationError` | `validation_error` |
+| `-32029` | `RateLimitError` | `rate_limited` |
+| `-32050` | `ApiConnectionError` | `network_error`, `network_timeout`; legacy `http_error` |
+| `-32051` | `ApiServerError` | `service_unavailable`, `internal_error`; legacy `server_error` |
+| `-32060` | `StorageError` | `database_error`, `file_error`, `path_error` |
+| `-32070` | `IntegrityError` | `integrity_error`, `transport_integrity_error`, `data_integrity_error`; legacy `data_error` |
+
+Classification is numeric-first. Distinctive kinds from older CLI releases
+(`duplicate_hash`, `*_already_exists`, `conflict`, `validation_error`, and
+the integrity aliases) are also mapped when their legacy code is `-32000`.
+`request_rejected`, `response_too_large`, and `cancelled` have explicit
+`ApiError` subtypes but are never guessed to be conflicts. Known
+authentication, permission, not-found, conflict, validation, storage,
+integrity, protocol, cancellation, and internal-server errors force
+`retryable == false`; only rate-limit, network, service-unavailable, or an
+unknown server-range code can preserve a true hint. `RateLimitError` exposes
+an optional validated `getRetryAfterSeconds()` value from 0 through 86400.
+The SDK never automatically retries a vault RPC.
+
+Typed errors are negotiated additively. The SDK sends
+`context.error_contract = "typed-v1"` only when the exact contract appears in
+the capability root's `error_contracts` list. Absence and unknown valid
+contracts remain compatible and do not opt in. The SDK never places raw
+request bodies, responses, or CLI stderr in exception messages.
+`getServerRequestId()` exposes a separately validated upstream correlation ID
+when one exists; it never replaces the local JSON-RPC `getRequestId()` and is
+not included in the default exception text.
 
 ## Protocol and process safety
 

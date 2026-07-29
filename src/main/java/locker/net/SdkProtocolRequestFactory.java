@@ -129,6 +129,14 @@ final class SdkProtocolRequestFactory {
             Operation operation,
             RequestOptions options
     ) throws LockerError {
+        return addContext(operation, options, false);
+    }
+
+    JsonObject addContext(
+            Operation operation,
+            RequestOptions options,
+            boolean typedErrorContract
+    ) throws LockerError {
         Map<String, String> environment = System.getenv();
         String accessKeyId = resolveAccessKeyId(
                 options == null ? null : options.getAccessKeyId(),
@@ -154,6 +162,9 @@ final class SdkProtocolRequestFactory {
 
         JsonObject context = new JsonObject();
         context.addProperty("protocol_version", PROTOCOL_VERSION);
+        if (typedErrorContract) {
+            context.addProperty("error_contract", "typed-v1");
+        }
         context.add("credentials", credentials);
         context.add("client", client);
 

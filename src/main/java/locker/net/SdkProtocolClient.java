@@ -14,11 +14,20 @@ import locker.exception.ApiConnectionError;
 import locker.exception.ApiError;
 import locker.exception.ApiServerError;
 import locker.exception.AuthenticationError;
+import locker.exception.AlreadyExistsError;
 import locker.exception.CliRunError;
+import locker.exception.ConflictError;
+import locker.exception.IntegrityError;
 import locker.exception.LockerError;
+import locker.exception.OperationCancelledError;
 import locker.exception.PermissionDeniedError;
+import locker.exception.ProtocolError;
 import locker.exception.RateLimitError;
 import locker.exception.ResourceNotFoundError;
+import locker.exception.RequestRejectedError;
+import locker.exception.ResponseTooLargeError;
+import locker.exception.StorageError;
+import locker.exception.ValidationError;
 
 import java.io.IOException;
 import java.io.StringReader;
@@ -40,14 +49,19 @@ final class SdkProtocolClient {
     private static final int CODE_METHOD_NOT_FOUND = -32601;
     private static final int CODE_INVALID_PARAMS = -32602;
     private static final int CODE_INTERNAL = -32603;
+    private static final int CODE_OPERATION = -32000;
     private static final int CODE_AUTHENTICATION = -32001;
     private static final int CODE_PERMISSION = -32003;
     private static final int CODE_NOT_FOUND = -32004;
+    private static final int CODE_CONFLICT = -32009;
+    private static final int CODE_VALIDATION = -32022;
     private static final int CODE_RATE_LIMITED = -32029;
     private static final int CODE_NETWORK = -32050;
     private static final int CODE_SERVER = -32051;
     private static final int CODE_STORAGE = -32060;
+    private static final int CODE_INTEGRITY = -32070;
     private static final String TRANSPORT = "json-rpc-2.0-stdio";
+    private static final String TYPED_ERROR_CONTRACT = "typed-v1";
     private static final int MAX_JSON_DEPTH = 256;
     private static final Set<String> REQUIRED_METHODS =
             Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
@@ -116,8 +130,12 @@ final class SdkProtocolClient {
                 );
             }
         }
-        JsonObject params = requestFactory.addContext(operation, options);
         Capabilities current = state.capabilities;
+        JsonObject params = requestFactory.addContext(
+                operation,
+                options,
+                current.errorContracts.contains(TYPED_ERROR_CONTRACT)
+        );
         Payload response = exchange(
                 operation.getMethod(),
                 params,
@@ -260,6 +278,33 @@ final class SdkProtocolClient {
                 );
             }
         }
+        Set<String> errorContracts = new HashSet<>();
+        if (data.has("error_contracts")) {
+            JsonElement contractsElement = data.get("error_contracts");
+            if (contractsElement == null
+                    || !contractsElement.isJsonArray()
+                    || contractsElement.getAsJsonArray().size() > 8) {
+                throw new ApiConnectionError(
+                        "Invalid Locker CLI capabilities response"
+                );
+            }
+            for (JsonElement contract
+                    : contractsElement.getAsJsonArray()) {
+                if (!contract.isJsonPrimitive()
+                        || !contract.getAsJsonPrimitive().isString()) {
+                    throw new ApiConnectionError(
+                            "Invalid Locker CLI capabilities response"
+                    );
+                }
+                String contractName = contract.getAsString();
+                if (!isValidErrorContract(contractName)
+                        || !errorContracts.add(contractName)) {
+                    throw new ApiConnectionError(
+                            "Invalid Locker CLI capabilities response"
+                    );
+                }
+            }
+        }
         JsonObject cli = requiredObject(
                 data,
                 "cli",
@@ -318,6 +363,7 @@ final class SdkProtocolClient {
         }
         return new Capabilities(
                 Collections.unmodifiableSet(methods),
+                Collections.unmodifiableSet(errorContracts),
                 (int) Math.min(
                         maxRequestBytes,
                         CliProcessRunner.MAX_REQUEST_BYTES
@@ -405,7 +451,9 @@ final class SdkProtocolClient {
         boolean hasResult = response.has("result");
         boolean hasError = response.has("error");
         if (hasResult == hasError) {
-            throw new CliRunError("Invalid Locker CLI protocol response");
+            throw new ProtocolError(
+                    "Invalid Locker CLI protocol response"
+            );
         }
         if (hasError) {
             throw protocolError(response.get("error"), requestId);
@@ -422,7 +470,7 @@ final class SdkProtocolClient {
             decoded = decodeUtf8(bytes);
             requireValidEscapedUnicode(decoded);
         } catch (IOException exception) {
-            throw new CliRunError(
+            throw new ProtocolError(
                     "Invalid Locker CLI protocol response",
                     exception
             );
@@ -450,12 +498,12 @@ final class SdkProtocolClient {
         } catch (IOException
                  | IllegalStateException
                  | NumberFormatException exception) {
-            throw new CliRunError(
+            throw new ProtocolError(
                     "Invalid Locker CLI protocol response",
                     exception
             );
         } catch (ApiConnectionError exception) {
-            throw new CliRunError(
+            throw new ProtocolError(
                     "Invalid Locker CLI protocol response",
                     exception
             );
@@ -683,10 +731,12 @@ final class SdkProtocolClient {
             );
             if (!SdkProtocolRequestFactory.JSON_RPC_VERSION.equals(jsonRpc)
                     || !requestId.equals(responseId)) {
-                throw new CliRunError("Invalid Locker CLI protocol response");
+                throw new ProtocolError(
+                        "Invalid Locker CLI protocol response"
+                );
             }
         } catch (ApiConnectionError exception) {
-            throw new CliRunError(
+            throw new ProtocolError(
                     "Invalid Locker CLI protocol response",
                     exception
             );
@@ -734,14 +784,14 @@ final class SdkProtocolClient {
             }
             return new Payload(result.get("data").deepCopy(), cliVersion);
         } catch (ApiConnectionError exception) {
-            throw new CliRunError(
+            throw new ProtocolError(
                     exception.getMessage(),
                     exception
             );
         }
     }
 
-    private static LockerError protocolError(
+    static LockerError protocolError(
             JsonElement errorElement,
             String requestId
     ) throws CliRunError {
@@ -755,7 +805,7 @@ final class SdkProtocolClient {
                     "code",
                     "Invalid Locker CLI protocol error"
             );
-            requiredString(
+            String message = requiredString(
                     error,
                     "message",
                     "Invalid Locker CLI protocol error"
@@ -780,24 +830,161 @@ final class SdkProtocolClient {
                     "retryable",
                     "Invalid Locker CLI protocol error"
             );
+            Integer retryAfterSeconds = null;
+            if (data.has("retry_after_seconds")) {
+                int value = requiredInteger(
+                        data,
+                        "retry_after_seconds",
+                        "Invalid Locker CLI protocol error"
+                );
+                if (value < 0 || value > 86400) {
+                    throw new ApiConnectionError(
+                            "Invalid Locker CLI protocol error"
+                    );
+                }
+                if (code == CODE_RATE_LIMITED
+                        && "rate_limited".equals(kind)) {
+                    retryAfterSeconds = value;
+                }
+            }
+            String serverRequestId = null;
+            if (data.has("server_request_id")) {
+                serverRequestId = requiredString(
+                        data,
+                        "server_request_id",
+                        "Invalid Locker CLI protocol error"
+                );
+                if (!isValidServerRequestId(serverRequestId)) {
+                    throw new ApiConnectionError(
+                            "Invalid Locker CLI protocol error"
+                    );
+                }
+            }
             if (protocolVersion
                     != SdkProtocolRequestFactory.PROTOCOL_VERSION
-                    || kind.isBlank()
-                    || kind.length() > 256) {
+                    || !isValidErrorKind(kind)
+                    || !isValidErrorMessage(message)) {
                 throw new ApiConnectionError(
-                    "Invalid Locker CLI protocol error"
+                        "Invalid Locker CLI protocol error"
                 );
             }
-            String safeMessage = safeErrorMessage(code);
+            if (!isStandardProtocolCode(code)
+                    && !isLockerServerErrorCode(code)) {
+                return new ProtocolError(
+                        "unsupported JSON-RPC error code",
+                        kind,
+                        code,
+                        requestId,
+                        false,
+                        serverRequestId
+                );
+            }
+            boolean effectiveRetryable = retryable
+                    && !isNormativelyNonRetryable(code, kind);
+            String safeMessage = safeErrorMessage(code, kind);
 
+            if ((code == CODE_CONFLICT || code == CODE_OPERATION)
+                    && isAlreadyExistsKind(kind)) {
+                return new AlreadyExistsError(
+                        safeMessage,
+                        kind,
+                        code,
+                        requestId,
+                        effectiveRetryable,
+                        serverRequestId
+                );
+            }
+            if (code == CODE_CONFLICT
+                    || (code == CODE_OPERATION
+                    && "conflict".equals(kind))) {
+                return new ConflictError(
+                        safeMessage,
+                        kind,
+                        code,
+                        requestId,
+                        effectiveRetryable,
+                        serverRequestId
+                );
+            }
+            if (code == CODE_VALIDATION
+                    || (code == CODE_OPERATION
+                    && "validation_error".equals(kind))) {
+                return new ValidationError(
+                        safeMessage,
+                        kind,
+                        code,
+                        requestId,
+                        effectiveRetryable,
+                        serverRequestId
+                );
+            }
+            if (code == CODE_INTEGRITY
+                    || (code == CODE_OPERATION
+                    && isIntegrityKind(kind))) {
+                return new IntegrityError(
+                        safeMessage,
+                        kind,
+                        code,
+                        requestId,
+                        effectiveRetryable,
+                        serverRequestId
+                );
+            }
+            if (code == CODE_OPERATION
+                    && "request_rejected".equals(kind)) {
+                return new RequestRejectedError(
+                        safeMessage,
+                        kind,
+                        code,
+                        requestId,
+                        false,
+                        serverRequestId
+                );
+            }
+            if (code == CODE_OPERATION
+                    && "response_too_large".equals(kind)) {
+                return new ResponseTooLargeError(
+                        safeMessage,
+                        kind,
+                        code,
+                        requestId,
+                        false,
+                        serverRequestId
+                );
+            }
+            if (code == CODE_OPERATION
+                    && "cancelled".equals(kind)) {
+                return new OperationCancelledError(
+                        safeMessage,
+                        kind,
+                        code,
+                        requestId,
+                        false,
+                        serverRequestId
+                );
+            }
             switch (code) {
+                case CODE_PARSE:
+                case CODE_INVALID_REQUEST:
+                case CODE_METHOD_NOT_FOUND:
+                case CODE_INVALID_PARAMS:
+                case CODE_INTERNAL:
+                    return new ProtocolError(
+                            safeMessage,
+                            kind,
+                            code,
+                            requestId,
+                            false,
+                            serverRequestId
+                    );
                 case CODE_AUTHENTICATION:
                     return new AuthenticationError(
                             safeMessage,
                             kind,
                             code,
                             requestId,
-                            retryable
+                            effectiveRetryable,
+                            serverRequestId
                     );
                 case CODE_PERMISSION:
                     return new PermissionDeniedError(
@@ -805,7 +992,8 @@ final class SdkProtocolClient {
                             kind,
                             code,
                             requestId,
-                            retryable
+                            effectiveRetryable,
+                            serverRequestId
                     );
                 case CODE_NOT_FOUND:
                     return new ResourceNotFoundError(
@@ -813,7 +1001,8 @@ final class SdkProtocolClient {
                             kind,
                             code,
                             requestId,
-                            retryable
+                            effectiveRetryable,
+                            serverRequestId
                     );
                 case CODE_RATE_LIMITED:
                     return new RateLimitError(
@@ -821,7 +1010,9 @@ final class SdkProtocolClient {
                             kind,
                             code,
                             requestId,
-                            retryable
+                            effectiveRetryable,
+                            retryAfterSeconds,
+                            serverRequestId
                     );
                 case CODE_NETWORK:
                     return new ApiConnectionError(
@@ -829,7 +1020,8 @@ final class SdkProtocolClient {
                             kind,
                             code,
                             requestId,
-                            retryable
+                            effectiveRetryable,
+                            serverRequestId
                     );
                 case CODE_SERVER:
                     return new ApiServerError(
@@ -837,15 +1029,17 @@ final class SdkProtocolClient {
                             kind,
                             code,
                             requestId,
-                            retryable
+                            effectiveRetryable,
+                            serverRequestId
                     );
                 case CODE_STORAGE:
-                    return new CliRunError(
+                    return new StorageError(
                             safeMessage,
                             kind,
                             code,
                             requestId,
-                            retryable
+                            effectiveRetryable,
+                            serverRequestId
                     );
                 default:
                     return new ApiError(
@@ -853,46 +1047,213 @@ final class SdkProtocolClient {
                             kind,
                             code,
                             requestId,
-                            retryable
+                            effectiveRetryable,
+                            serverRequestId
                     );
             }
         } catch (ApiConnectionError exception) {
-            throw new CliRunError(
+            throw new ProtocolError(
                     "Invalid Locker CLI protocol error",
                     exception
             );
         }
     }
 
-    private static String safeErrorMessage(int code) {
+    private static String safeErrorMessage(int code, String kind) {
+        if (isAlreadyExistsKind(kind)
+                && (code == CODE_CONFLICT || code == CODE_OPERATION)) {
+            if ("secret_already_exists".equals(kind)) {
+                return "a secret with this key already exists";
+            }
+            if ("environment_already_exists".equals(kind)) {
+                return "an environment with this name already exists";
+            }
+            return "the requested resource already exists";
+        }
         switch (code) {
             case CODE_PARSE:
-                return "Locker CLI could not parse the SDK protocol request";
+                return "the Locker CLI returned invalid JSON";
             case CODE_INVALID_REQUEST:
-                return "Locker CLI rejected the SDK protocol request";
+                return "the Locker CLI rejected the request envelope";
             case CODE_METHOD_NOT_FOUND:
-                return "Locker CLI does not support the SDK operation";
+                return "the requested Locker operation is not supported";
             case CODE_INVALID_PARAMS:
-                return "Locker CLI rejected the SDK operation parameters";
+                return "the Locker request parameters are invalid";
             case CODE_INTERNAL:
-                return "Locker CLI protocol failed";
+                return "the Locker CLI encountered an internal protocol error";
             case CODE_AUTHENTICATION:
-                return "Locker authentication failed";
+                return "authentication failed";
             case CODE_PERMISSION:
-                return "Locker permission was denied";
+                return "you do not have permission to perform this operation";
             case CODE_NOT_FOUND:
-                return "Locker resource was not found";
+                if ("secret_not_found".equals(kind)) {
+                    return "the requested secret was not found";
+                }
+                if ("environment_not_found".equals(kind)) {
+                    return "the requested environment was not found";
+                }
+                return "the requested resource was not found";
+            case CODE_CONFLICT:
+                return "the operation conflicts with current state";
+            case CODE_VALIDATION:
+                return "the request is invalid";
             case CODE_RATE_LIMITED:
-                return "Locker request was rate limited";
+                return "too many requests; retry later";
             case CODE_NETWORK:
-                return "Locker network request failed";
+                return "network_timeout".equals(kind)
+                        ? "network request timed out"
+                        : "network request failed";
             case CODE_SERVER:
-                return "Locker server request failed";
+                if ("internal_error".equals(kind)) {
+                    return "the request could not be completed";
+                }
+                return "the service is temporarily unavailable";
             case CODE_STORAGE:
-                return "Locker local storage operation failed";
+                return "local storage operation failed";
+            case CODE_INTEGRITY:
+                return integrityMessage(kind);
             default:
-                return "Locker operation failed";
+                if (code != CODE_OPERATION) {
+                    return "the Locker operation failed";
+                }
+                if ("conflict".equals(kind)) {
+                    return "the operation conflicts with current state";
+                }
+                if ("validation_error".equals(kind)) {
+                    return "the request is invalid";
+                }
+                if (isIntegrityKind(kind)) {
+                    return integrityMessage(kind);
+                }
+                if ("request_rejected".equals(kind)) {
+                    return "the request is invalid";
+                }
+                if ("response_too_large".equals(kind)) {
+                    return "protocol response exceeds the size limit";
+                }
+                if ("cancelled".equals(kind)) {
+                    return "request cancelled";
+                }
+                return "the Locker operation failed";
         }
+    }
+
+    private static boolean isAlreadyExistsKind(String kind) {
+        return "already_exists".equals(kind)
+                || "secret_already_exists".equals(kind)
+                || "environment_already_exists".equals(kind)
+                || "duplicate_hash".equals(kind);
+    }
+
+    private static boolean isIntegrityKind(String kind) {
+        return "integrity_error".equals(kind)
+                || "transport_integrity_error".equals(kind)
+                || "data_integrity_error".equals(kind)
+                || "data_error".equals(kind);
+    }
+
+    private static String integrityMessage(String kind) {
+        switch (kind) {
+            case "integrity_error":
+                return "stored data failed an integrity check";
+            case "transport_integrity_error":
+                return "transport integrity verification failed";
+            case "data_integrity_error":
+            case "data_error":
+                return "data integrity verification failed";
+            default:
+                return "data integrity verification failed";
+        }
+    }
+
+    private static boolean isNormativelyNonRetryable(
+            int code,
+            String kind
+    ) {
+        return isStandardProtocolCode(code)
+                || code == CODE_AUTHENTICATION
+                || code == CODE_PERMISSION
+                || code == CODE_NOT_FOUND
+                || code == CODE_OPERATION
+                || code == CODE_CONFLICT
+                || code == CODE_VALIDATION
+                || code == CODE_STORAGE
+                || code == CODE_INTEGRITY
+                || (code == CODE_SERVER
+                && "internal_error".equals(kind));
+    }
+
+    private static boolean isStandardProtocolCode(int code) {
+        return code == CODE_PARSE
+                || code == CODE_INVALID_REQUEST
+                || code == CODE_METHOD_NOT_FOUND
+                || code == CODE_INVALID_PARAMS
+                || code == CODE_INTERNAL;
+    }
+
+    private static boolean isLockerServerErrorCode(int code) {
+        return code >= -32099 && code <= -32000;
+    }
+
+    private static boolean isValidErrorKind(String kind) {
+        if (kind.length() < 1 || kind.length() > 64
+                || kind.charAt(0) < 'a' || kind.charAt(0) > 'z') {
+            return false;
+        }
+        for (int index = 1; index < kind.length(); index++) {
+            char value = kind.charAt(index);
+            if ((value < 'a' || value > 'z')
+                    && (value < '0' || value > '9')
+                    && value != '_') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isValidErrorContract(String contract) {
+        if (contract.length() < 1 || contract.length() > 32
+                || contract.charAt(0) < 'a'
+                || contract.charAt(0) > 'z') {
+            return false;
+        }
+        for (int index = 1; index < contract.length(); index++) {
+            char value = contract.charAt(index);
+            if ((value < 'a' || value > 'z')
+                    && (value < '0' || value > '9')
+                    && value != '-') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean isValidErrorMessage(String message) {
+        if (message.isEmpty()
+                || message.codePointCount(0, message.length()) > 512) {
+            return false;
+        }
+        return message.codePoints().noneMatch(
+                value -> value <= 0x1f
+                        || (value >= 0x7f && value <= 0x9f)
+        );
+    }
+
+    private static boolean isValidServerRequestId(String requestId) {
+        if (requestId.length() < 16 || requestId.length() > 128) {
+            return false;
+        }
+        for (int index = 0; index < requestId.length(); index++) {
+            char value = requestId.charAt(index);
+            if ((value < 'A' || value > 'Z')
+                    && (value < 'a' || value > 'z')
+                    && (value < '0' || value > '9')
+                    && value != '_'
+                    && value != '-') {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static JsonObject requiredObject(
@@ -1011,6 +1372,7 @@ final class SdkProtocolClient {
 
     private static final class Capabilities {
         private final Set<String> methods;
+        private final Set<String> errorContracts;
         private final int maxRequestBytes;
         private final int maxResponseBytes;
         private final int maxJsonDepth;
@@ -1018,12 +1380,14 @@ final class SdkProtocolClient {
 
         private Capabilities(
                 Set<String> methods,
+                Set<String> errorContracts,
                 int maxRequestBytes,
                 int maxResponseBytes,
                 int maxJsonDepth,
                 String cliVersion
         ) {
             this.methods = methods;
+            this.errorContracts = errorContracts;
             this.maxRequestBytes = maxRequestBytes;
             this.maxResponseBytes = maxResponseBytes;
             this.maxJsonDepth = maxJsonDepth;

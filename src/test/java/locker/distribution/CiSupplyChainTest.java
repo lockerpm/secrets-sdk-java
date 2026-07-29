@@ -37,6 +37,17 @@ final class CiSupplyChainTest {
                 pipeline.contains("workflow:"),
                 "release CI must define pipeline-level tag suppression");
         assertTrue(
+                pipeline.contains("CI_PIPELINE_SOURCE == \"merge_request_event\"")
+                        && pipeline.contains(
+                        "CI_PIPELINE_SOURCE == \"push\" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+                )
+                        && pipeline.contains("- when: never"),
+                "CI must validate merge requests and admit releases only from main pushes");
+        assertFalse(
+                pipeline.contains("CI_OPEN_MERGE_REQUESTS")
+                        || pipeline.contains("- if: '$CI_COMMIT_BRANCH'"),
+                "plain feature-branch pushes must not create pipelines");
+        assertTrue(
                 pipeline.contains(".m2/release-${CI_JOB_ID}"),
                 "release jobs must isolate their local Maven repositories");
         assertTrue(

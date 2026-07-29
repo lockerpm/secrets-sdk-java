@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.Set;
 
 public final class SdkProtocolFixture {
     private SdkProtocolFixture() {
@@ -43,6 +44,125 @@ public final class SdkProtocolFixture {
                     -32000,
                     "response_too_large",
                     "response too large"
+            );
+        } else if ("operation-cancelled-error".equals(mode)) {
+            response = operationErrorResponse(
+                    request,
+                    -32000,
+                    "cancelled",
+                    "unsafe cancellation detail"
+            );
+        } else if ("already-exists".equals(mode)) {
+            response = operationErrorResponse(
+                    request,
+                    -32009,
+                    "secret_already_exists",
+                    "unsafe duplicate detail"
+            );
+        } else if ("conflict".equals(mode)) {
+            response = operationErrorResponse(
+                    request,
+                    -32009,
+                    "conflict",
+                    "unsafe conflict detail"
+            );
+        } else if ("validation-error".equals(mode)) {
+            response = operationErrorResponse(
+                    request,
+                    -32022,
+                    "validation_error",
+                    "unsafe validation detail"
+            );
+        } else if ("integrity-error".equals(mode)) {
+            response = operationErrorResponse(
+                    request,
+                    -32070,
+                    "integrity_error",
+                    "unsafe integrity detail"
+            );
+        } else if ("protocol-error".equals(mode)) {
+            response = operationErrorResponse(
+                    request,
+                    -32602,
+                    "invalid_params",
+                    "unsafe protocol detail"
+            );
+        } else if ("storage-error".equals(mode)) {
+            response = operationErrorResponse(
+                    request,
+                    -32060,
+                    "storage_error",
+                    "unsafe storage detail"
+            );
+        } else if ("internal-server-error".equals(mode)) {
+            response = operationErrorResponse(
+                    request,
+                    -32051,
+                    "internal_error",
+                    "unsafe internal detail"
+            );
+        } else if (mode.startsWith("rate-limit-")) {
+            response = operationErrorResponse(
+                    request,
+                    -32029,
+                    "rate_limited",
+                    "unsafe rate limit detail"
+            );
+        } else if ("future-known-kind".equals(mode)) {
+            response = operationErrorResponse(
+                    request,
+                    -32099,
+                    "secret_already_exists",
+                    "safe future error"
+            );
+        } else if ("legacy-already-exists".equals(mode)) {
+            response = operationErrorResponse(
+                    request,
+                    -32000,
+                    "duplicate_hash",
+                    "unsafe legacy duplicate detail"
+            );
+        } else if ("legacy-conflict".equals(mode)) {
+            response = operationErrorResponse(
+                    request,
+                    -32000,
+                    "conflict",
+                    "unsafe legacy conflict detail"
+            );
+        } else if ("generic-request-rejected".equals(mode)) {
+            response = operationErrorResponse(
+                    request,
+                    -32000,
+                    "request_rejected",
+                    "unsafe generic rejection detail"
+            );
+        } else if ("future-server-error".equals(mode)) {
+            response = operationErrorResponse(
+                    request,
+                    -32099,
+                    "future_error",
+                    "safe future error"
+            );
+        } else if ("outside-server-range".equals(mode)) {
+            response = operationErrorResponse(
+                    request,
+                    -32100,
+                    "future_error",
+                    "safe future error"
+            );
+        } else if ("invalid-error-kind".equals(mode)) {
+            response = operationErrorResponse(
+                    request,
+                    -32000,
+                    "Invalid-Kind",
+                    "safe error"
+            );
+        } else if ("invalid-error-message".equals(mode)) {
+            response = operationErrorResponse(
+                    request,
+                    -32000,
+                    "operation_error",
+                    "unsafe\nlog"
             );
         } else {
             validateContext(request);
@@ -126,6 +246,17 @@ public final class SdkProtocolFixture {
         data.add("methods", methods);
         data.add("cli", object("version", "fixture-cli"));
         String fixtureMode = System.getProperty("locker.fixture.mode");
+        if (!"legacy-error-contract".equals(fixtureMode)) {
+            JsonArray errorContracts = new JsonArray();
+            if ("unknown-error-contract".equals(fixtureMode)) {
+                errorContracts.add("future-v2");
+            } else if ("invalid-error-contract".equals(fixtureMode)) {
+                errorContracts.add("Invalid_Contract");
+            } else {
+                errorContracts.add("typed-v1");
+            }
+            data.add("error_contracts", errorContracts);
+        }
         JsonObject limits = longObject(
                 "max_request_bytes",
                 "small-limit".equals(
@@ -235,6 +366,17 @@ public final class SdkProtocolFixture {
         if (context.get("protocol_version").getAsInt() != 1) {
             throw new IllegalArgumentException("protocol version");
         }
+        String fixtureMode = System.getProperty("locker.fixture.mode");
+        if ("legacy-error-contract".equals(fixtureMode)
+                || "unknown-error-contract".equals(fixtureMode)) {
+            if (context.has("error_contract")) {
+                throw new IllegalArgumentException(
+                        "unadvertised error contract"
+                );
+            }
+        } else {
+            require(context, "error_contract", "typed-v1");
+        }
         JsonObject credentials = context.getAsJsonObject("credentials");
         require(credentials, "access_key_id", "fake-access-key");
         require(credentials, "secret_access_key", "fake-secret-key");
@@ -276,9 +418,51 @@ public final class SdkProtocolFixture {
             String message
     ) {
         JsonObject data = new JsonObject();
+        String fixtureMode = System.getProperty("locker.fixture.mode");
         data.addProperty("protocol_version", 1);
         data.addProperty("kind", kind);
-        data.addProperty("retryable", false);
+        data.addProperty(
+                "retryable",
+                fixtureMode.startsWith("rate-limit-") || Set.of(
+                        "already-exists",
+                        "conflict",
+                        "validation-error",
+                        "integrity-error",
+                        "legacy-already-exists",
+                        "legacy-conflict",
+                        "response-too-large-error",
+                        "generic-request-rejected",
+                        "operation-cancelled-error",
+                        "not-found",
+                        "protocol-error",
+                        "storage-error",
+                        "internal-server-error",
+                        "future-server-error",
+                        "future-known-kind"
+                ).contains(fixtureMode)
+        );
+        switch (fixtureMode) {
+            case "rate-limit-zero":
+                data.addProperty("retry_after_seconds", 0);
+                break;
+            case "rate-limit-boundary":
+                data.addProperty("retry_after_seconds", 86400);
+                break;
+            case "rate-limit-bool":
+                data.addProperty("retry_after_seconds", true);
+                break;
+            case "rate-limit-negative":
+                data.addProperty("retry_after_seconds", -1);
+                break;
+            case "rate-limit-too-large":
+                data.addProperty("retry_after_seconds", 86401);
+                break;
+            case "rate-limit-fraction":
+                data.addProperty("retry_after_seconds", 1.5);
+                break;
+            default:
+                break;
+        }
 
         JsonObject error = new JsonObject();
         error.addProperty("code", code);

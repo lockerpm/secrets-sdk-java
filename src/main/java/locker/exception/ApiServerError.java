@@ -19,6 +19,17 @@ public class ApiServerError extends LockerError {
             String requestId,
             boolean retryable
     ) {
+        this(message, errorCode, protocolCode, requestId, retryable, null);
+    }
+
+    public ApiServerError(
+            String message,
+            String errorCode,
+            int protocolCode,
+            String requestId,
+            boolean retryable,
+            String serverRequestId
+    ) {
         super(
                 message,
                 null,
@@ -26,6 +37,7 @@ public class ApiServerError extends LockerError {
                 protocolCode,
                 requestId,
                 retryable,
+                serverRequestId,
                 null
         );
     }

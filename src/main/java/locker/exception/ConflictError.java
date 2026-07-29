@@ -1,27 +1,33 @@
 package locker.exception;
 
-public class PermissionDeniedError extends LockerError {
+/**
+ * The operation conflicts with the current Locker resource state.
+ */
+public class ConflictError extends ApiError {
     private static final long serialVersionUID = 1L;
 
-    public PermissionDeniedError(String message, String jsonBody, String errorCode) {
-        super(message, jsonBody, errorCode);
-    }
-
-    protected PermissionDeniedError(String message) {
+    public ConflictError(String message) {
         super(message);
     }
 
-    public PermissionDeniedError(
+    public ConflictError(
             String message,
             String errorCode,
             int protocolCode,
             String requestId,
             boolean retryable
     ) {
-        this(message, errorCode, protocolCode, requestId, retryable, null);
+        this(
+                message,
+                errorCode,
+                protocolCode,
+                requestId,
+                retryable,
+                null
+        );
     }
 
-    public PermissionDeniedError(
+    public ConflictError(
             String message,
             String errorCode,
             int protocolCode,
@@ -31,13 +37,11 @@ public class PermissionDeniedError extends LockerError {
     ) {
         super(
                 message,
-                null,
                 errorCode,
                 protocolCode,
                 requestId,
                 retryable,
-                serverRequestId,
-                null
+                serverRequestId
         );
     }
 }

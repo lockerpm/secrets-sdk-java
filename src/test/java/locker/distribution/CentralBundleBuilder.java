@@ -24,6 +24,11 @@ import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
+import javax.xml.XMLConstants;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
+import org.w3c.dom.Document;
 
 /**
  * Test-scope release utility that creates one deterministic Central bundle.
@@ -95,12 +100,13 @@ public final class CentralBundleBuilder {
         Path target = root.resolve("target");
         String artifactBase = "lockersm-" + version;
         String centralPath = "io/locker/lockersm/" + version + "/";
+        String pomEntry = centralPath + artifactBase + ".pom";
         String mainJarEntry = centralPath + artifactBase + ".jar";
 
         List<ArtifactInput> inputs = List.of(
                 new ArtifactInput(
-                        root.resolve("pom.xml"),
-                        centralPath + artifactBase + ".pom"
+                        root.resolve(".flattened-pom.xml"),
+                        pomEntry
                 ),
                 new ArtifactInput(
                         target.resolve(artifactBase + ".jar"),
@@ -115,7 +121,7 @@ public final class CentralBundleBuilder {
                         centralPath + artifactBase + "-javadoc.jar"
                 ),
                 new ArtifactInput(
-                        target.resolve("gpg").resolve("pom.xml.asc"),
+                        target.resolve(artifactBase + ".pom.asc"),
                         centralPath + artifactBase + ".pom.asc"
                 ),
                 new ArtifactInput(
@@ -157,13 +163,18 @@ public final class CentralBundleBuilder {
         }
 
         try {
+            verifyFlattenedPom(entries.get(pomEntry), version);
             ReleaseReadinessVerifier.verifyPackagedArtifact(
                     root,
                     expectedPublicKeyPath,
-                    entries.get(mainJarEntry)
+                    entries.get(mainJarEntry),
+                    version
             );
             Map<String, byte[]> generated = new HashMap<>(entries);
             for (Map.Entry<String, byte[]> entry : entries.entrySet()) {
+                if (entry.getKey().endsWith(".asc")) {
+                    continue;
+                }
                 for (Map.Entry<String, String> checksum
                         : CHECKSUMS.entrySet()) {
                     String checksumName =
@@ -202,6 +213,66 @@ public final class CentralBundleBuilder {
             }
         } finally {
             erase(entries.values());
+        }
+    }
+
+    private static void verifyFlattenedPom(
+            byte[] pomBytes,
+            String expectedVersion
+    ) throws Exception {
+        if (pomBytes == null
+                || new String(
+                pomBytes,
+                java.nio.charset.StandardCharsets.UTF_8
+        ).contains("${revision}")) {
+            throw new IOException(
+                    "Published Maven POM still contains CI-friendly "
+                            + "version placeholders"
+            );
+        }
+        DocumentBuilderFactory factory =
+                DocumentBuilderFactory.newInstance();
+        factory.setFeature(
+                "http://apache.org/xml/features/disallow-doctype-decl",
+                true
+        );
+        factory.setFeature(
+                "http://xml.org/sax/features/external-general-entities",
+                false
+        );
+        factory.setFeature(
+                "http://xml.org/sax/features/external-parameter-entities",
+                false
+        );
+        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+        Document document = factory.newDocumentBuilder().parse(
+                new java.io.ByteArrayInputStream(pomBytes)
+        );
+        javax.xml.xpath.XPath xpath =
+                XPathFactory.newInstance().newXPath();
+        String project = "/*[local-name()='project']";
+        String group = (String) xpath.evaluate(
+                project + "/*[local-name()='groupId']/text()",
+                document,
+                XPathConstants.STRING
+        );
+        String artifact = (String) xpath.evaluate(
+                project + "/*[local-name()='artifactId']/text()",
+                document,
+                XPathConstants.STRING
+        );
+        String version = (String) xpath.evaluate(
+                project + "/*[local-name()='version']/text()",
+                document,
+                XPathConstants.STRING
+        );
+        if (!"io.locker".equals(group.trim())
+                || !"lockersm".equals(artifact.trim())
+                || !expectedVersion.equals(version.trim())) {
+            throw new IOException(
+                    "Published Maven POM identity does not match the release"
+            );
         }
     }
 

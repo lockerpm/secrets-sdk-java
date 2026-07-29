@@ -102,6 +102,7 @@ public final class LockerCliInstaller {
     private final PlatformIdentity platform;
     private final byte[] trustedPublicKey;
     private final PublicationObserver publicationObserver;
+    private volatile String detachedSignatureBinding;
 
     /**
      * Creates a lazy production updater. This constructor performs no I/O.
@@ -224,15 +225,32 @@ public final class LockerCliInstaller {
                         publicKey
                 );
                 requirePointerBinding(pointer, trusted);
+            }
+        } catch (CliDistributionException exception) {
+            cacheFailure = exception;
+        }
+        if (pointer != null
+                && currentGeneration != null
+                && trusted != null) {
+            try {
                 cache = verifyCachedBinary(
                         currentGeneration,
                         publicKey,
                         trusted,
-                        pointer
+                        pointer,
+                        requiresDetachedSignature(pointer)
+                );
+            } catch (CliDistributionException exception) {
+                // A published generation with authentic metadata but an
+                // invalid executable/signature is an integrity incident, not
+                // an update opportunity. Do not silently replace it in the
+                // same execution path.
+                throw new CliDistributionException(
+                        "The active managed Locker CLI failed signed "
+                                + "integrity verification",
+                        exception
                 );
             }
-        } catch (CliDistributionException exception) {
-            cacheFailure = exception;
         }
 
         if (cache != null) {
@@ -492,19 +510,23 @@ public final class LockerCliInstaller {
             GenerationLayout generation,
             byte[] publicKey,
             TrustedDocuments documents,
-            GenerationPointer pointer
+            GenerationPointer pointer,
+            boolean verifyDetachedSignature
     ) throws CliDistributionException {
-        byte[] signature = readRegularFile(
-                generation.signature,
-                SignedUpdateContract.SIGNATURE_BYTES,
-                "Cached Locker CLI signature"
-        );
+        byte[] signature = null;
         try {
-            if (signature.length
-                    != SignedUpdateContract.SIGNATURE_BYTES) {
-                throw invalid(
-                        "Cached Locker CLI signature has an invalid size"
+            if (verifyDetachedSignature) {
+                signature = readRegularFile(
+                        generation.signature,
+                        SignedUpdateContract.SIGNATURE_BYTES,
+                        "Cached Locker CLI signature"
                 );
+                if (signature.length
+                        != SignedUpdateContract.SIGNATURE_BYTES) {
+                    throw invalid(
+                            "Cached Locker CLI signature has an invalid size"
+                    );
+                }
             }
             verifyBinaryFile(
                     generation.binary,
@@ -516,14 +538,33 @@ public final class LockerCliInstaller {
             requirePrivate(generation.signature, false, false);
             requirePrivate(generation.latest, false, false);
             requirePrivate(generation.manifest, false, false);
+            if (verifyDetachedSignature) {
+                detachedSignatureBinding = signatureBinding(pointer);
+            }
             return new VerifiedCache(
                     generation.binary,
                     documents,
                     pointer.latestSha256
             );
         } finally {
-            Arrays.fill(signature, (byte) 0);
+            if (signature != null) {
+                Arrays.fill(signature, (byte) 0);
+            }
         }
+    }
+
+    private boolean requiresDetachedSignature(
+            GenerationPointer pointer
+    ) {
+        return !signatureBinding(pointer).equals(
+                detachedSignatureBinding
+        );
+    }
+
+    private static String signatureBinding(
+            GenerationPointer pointer
+    ) {
+        return pointer.generation + ":" + pointer.latestSha256;
     }
 
     private Path downloadBinary(
@@ -700,8 +741,9 @@ public final class LockerCliInstaller {
             );
         }
         MessageDigest digest = sha256Digest();
-        Ed25519Signer verifier =
-                SignedUpdateContract.newStreamingVerifier(publicKey);
+        Ed25519Signer verifier = signature == null
+                ? null
+                : SignedUpdateContract.newStreamingVerifier(publicKey);
         byte[] buffer = new byte[8192];
         long total = 0;
         try (FileChannel input = FileChannel.open(
@@ -718,6 +760,11 @@ public final class LockerCliInstaller {
             ByteBuffer bytes = ByteBuffer.wrap(buffer);
             int read;
             while (true) {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new CliDistributionException(
+                            "Managed Locker CLI verification was interrupted"
+                    );
+                }
                 bytes.clear();
                 read = input.read(bytes);
                 if (read < 0) {
@@ -736,7 +783,9 @@ public final class LockerCliInstaller {
                     );
                 }
                 digest.update(buffer, 0, read);
-                verifier.update(buffer, 0, read);
+                if (verifier != null) {
+                    verifier.update(buffer, 0, read);
+                }
             }
         } catch (IOException exception) {
             throw new CliDistributionException(
@@ -756,7 +805,8 @@ public final class LockerCliInstaller {
                 artifact.getSha256(),
                 hexadecimal(digest.digest())
         )
-                || !verifier.verifySignature(signature)) {
+                || verifier != null
+                && !verifier.verifySignature(signature)) {
             throw invalid(
                     "Managed Locker CLI failed signed cache verification"
             );
@@ -846,7 +896,8 @@ public final class LockerCliInstaller {
                     published,
                     publicKey,
                     publishedDocuments,
-                    pointer
+                    pointer,
+                    true
             );
 
             writePointer(layout.pointer, pointer);

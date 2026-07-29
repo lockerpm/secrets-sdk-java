@@ -3,19 +3,25 @@ package locker.distribution;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -60,7 +66,7 @@ public class CentralBundleBuilderTest {
         try (ZipFile zip = new ZipFile(output.toFile())) {
             Set<String> names = new HashSet<>();
             zip.stream().forEach(entry -> names.add(entry.getName()));
-            assertEquals(40, names.size());
+            assertEquals(24, names.size());
 
             String prefix = "io/locker/lockersm/" + VERSION
                     + "/lockersm-" + VERSION;
@@ -71,6 +77,7 @@ public class CentralBundleBuilderTest {
             assertTrue(names.contains(prefix + "-sources.jar"));
             assertTrue(names.contains(prefix + "-javadoc.jar"));
             assertTrue(names.contains(prefix + ".jar.sha256"));
+            assertFalse(names.contains(prefix + ".jar.asc.sha256"));
 
             byte[] jarBytes = zip.getInputStream(
                     zip.getEntry(prefix + ".jar")
@@ -86,6 +93,100 @@ public class CentralBundleBuilderTest {
                     StandardCharsets.US_ASCII
             );
             assertEquals(expectedChecksum, actualChecksum);
+        }
+    }
+
+    @Test
+    public void builtBundleIsAcceptedByPublicReconciler()
+            throws Exception {
+        Path protectedKey = prepareInputs(true, PUBLIC_KEY);
+        CentralPublicReconcilerTest.SigningMaterial signing =
+                CentralPublicReconcilerTest.SigningMaterial.create(
+                        "central-bundle-integration"
+                );
+        signReleaseInputs(signing);
+        Path signingKey = temporaryDirectory.resolve(
+                "maven-signing-key.pgp"
+        );
+        Files.write(signingKey, signing.encodedSecretKey());
+        Path output = temporaryDirectory.resolve(
+                "release-dist/central-bundle.zip"
+        );
+
+        CentralBundleBuilder.build(
+                temporaryDirectory,
+                VERSION,
+                output,
+                Instant.parse("2026-07-26T00:00:00Z"),
+                protectedKey
+        );
+        CentralPublicReconciler.ExpectedRelease expected =
+                CentralPublicReconciler.ExpectedRelease.fromBundle(
+                        output,
+                        VERSION,
+                        signingKey
+                );
+        expected.erase();
+    }
+
+    @Test
+    public void stageVerifiedRecoveryChecksDeploymentUrisBundleAndKey()
+            throws Exception {
+        Path protectedKey = prepareInputs(true, PUBLIC_KEY);
+        CentralPublicReconcilerTest.SigningMaterial signing =
+                CentralPublicReconcilerTest.SigningMaterial.create(
+                        "central-recovery-integration"
+                );
+        signReleaseInputs(signing);
+        Path signingKey = temporaryDirectory.resolve(
+                "maven-recovery-signing-key.pgp"
+        );
+        Files.write(signingKey, signing.encodedSecretKey());
+        Path bundle = temporaryDirectory.resolve(
+                "release-dist/central-recovery-bundle.zip"
+        );
+        CentralBundleBuilder.build(
+                temporaryDirectory,
+                VERSION,
+                bundle,
+                Instant.parse("2026-07-26T00:00:00Z"),
+                protectedKey
+        );
+        RecoveredDeploymentTransport transport =
+                new RecoveredDeploymentTransport(bundle);
+        Path deploymentId = temporaryDirectory.resolve(
+                "central-deployment-id"
+        );
+
+        new CentralPublisher(
+                transport,
+                milliseconds -> {
+                },
+                "token-user",
+                "token-password"
+        ).stageVerified(
+                bundle,
+                deploymentId,
+                "v" + VERSION,
+                signingKey
+        );
+
+        assertEquals(
+                RecoveredDeploymentTransport.DEPLOYMENT_ID + "\n",
+                Files.readString(
+                        deploymentId,
+                        StandardCharsets.US_ASCII
+                )
+        );
+        assertFalse(transport.uploadAttempted);
+        assertEquals(24, transport.artifacts.size());
+        assertEquals(transport.artifacts.size(), transport.downloads);
+        assertEquals(26, transport.requests.size());
+        for (String artifact : transport.artifacts.keySet()) {
+            assertTrue(transport.requests.contains(
+                    RecoveredDeploymentTransport.DOWNLOAD_PREFIX
+                            + artifact
+            ));
         }
     }
 
@@ -189,13 +290,17 @@ public class CentralBundleBuilderTest {
             throws Exception {
         String artifactBase = "lockersm-" + VERSION;
         Path target = temporaryDirectory.resolve("target");
-        Files.createDirectories(target.resolve("gpg"));
+        Files.createDirectories(target);
         Path protectedKey = temporaryDirectory.resolve(
                 "protected-public-key.txt"
         );
         Files.writeString(
-                temporaryDirectory.resolve("pom.xml"),
-                "<project/>",
+                temporaryDirectory.resolve(".flattened-pom.xml"),
+                "<project>"
+                        + "<groupId>io.locker</groupId>"
+                        + "<artifactId>lockersm</artifactId>"
+                        + "<version>" + VERSION + "</version>"
+                        + "</project>",
                 StandardCharsets.UTF_8
         );
         writeCanonicalKey(protectedKey, PUBLIC_KEY);
@@ -244,11 +349,43 @@ public class CentralBundleBuilderTest {
             }
         }
         Files.writeString(
-                target.resolve("gpg/pom.xml.asc"),
+                target.resolve(artifactBase + ".pom.asc"),
                 "signature:pom",
                 StandardCharsets.US_ASCII
         );
         return protectedKey;
+    }
+
+    private void signReleaseInputs(
+            CentralPublicReconcilerTest.SigningMaterial signing
+    ) throws Exception {
+        String artifactBase = "lockersm-" + VERSION;
+        Path target = temporaryDirectory.resolve("target");
+        Instant timestamp = Instant.parse("2026-07-26T00:00:00Z");
+        Files.write(
+                target.resolve(artifactBase + ".pom.asc"),
+                signing.sign(
+                        Files.readAllBytes(
+                                temporaryDirectory.resolve(
+                                        ".flattened-pom.xml"
+                                )
+                        ),
+                        timestamp
+                )
+        );
+        for (String filename : new String[]{
+                artifactBase + ".jar",
+                artifactBase + "-sources.jar",
+                artifactBase + "-javadoc.jar"
+        }) {
+            Files.write(
+                    target.resolve(filename + ".asc"),
+                    signing.sign(
+                            Files.readAllBytes(target.resolve(filename)),
+                            timestamp
+                    )
+            );
+        }
     }
 
     private static void writeSdkJar(
@@ -268,18 +405,21 @@ public class CentralBundleBuilderTest {
         try (ZipOutputStream zip = new ZipOutputStream(
                 Files.newOutputStream(path)
         )) {
-            if (versionedInstallerClass != null) {
-                zip.putNextEntry(new ZipEntry(
-                        "META-INF/MANIFEST.MF"
-                ));
-                zip.write(
-                        (
-                                "Manifest-Version: 1.0\n"
-                                        + "Multi-Release: true\n\n"
-                        ).getBytes(StandardCharsets.US_ASCII)
-                );
-                zip.closeEntry();
-            }
+            zip.putNextEntry(new ZipEntry(
+                    "META-INF/MANIFEST.MF"
+            ));
+            zip.write(
+                    (
+                            "Manifest-Version: 1.0\n"
+                                    + "Implementation-Version: "
+                                    + VERSION + "\n"
+                                    + (versionedInstallerClass == null
+                                    ? ""
+                                    : "Multi-Release: true\n")
+                                    + "\n"
+                    ).getBytes(StandardCharsets.US_ASCII)
+            );
+            zip.closeEntry();
             zip.putNextEntry(new ZipEntry(
                     "locker-cli-ed25519-public-key.txt"
             ));
@@ -327,5 +467,104 @@ public class CentralBundleBuilderTest {
             result.append(Character.forDigit(value & 0x0f, 16));
         }
         return result.toString();
+    }
+
+    private static final class RecoveredDeploymentTransport
+            implements CentralPublisher.Transport {
+        private static final String DEPLOYMENT_ID =
+                "28570f16-da32-4c14-bd2e-c1acc0782365";
+        private static final String DOWNLOAD_PREFIX =
+                "/api/v1/publisher/deployment/"
+                        + DEPLOYMENT_ID
+                        + "/download/";
+
+        private final Map<String, byte[]> artifacts =
+                new LinkedHashMap<>();
+        private final List<String> requests = new ArrayList<>();
+        private boolean uploadAttempted;
+        private int downloads;
+
+        private RecoveredDeploymentTransport(Path bundle)
+                throws Exception {
+            try (ZipFile zip = new ZipFile(bundle.toFile())) {
+                for (ZipEntry entry : java.util.Collections.list(
+                        zip.entries()
+                )) {
+                    if (!entry.isDirectory()) {
+                        try (InputStream input =
+                                     zip.getInputStream(entry)) {
+                            artifacts.put(
+                                    entry.getName(),
+                                    input.readAllBytes()
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        @Override
+        public CentralPublisher.Response send(
+                CentralPublisher.Request request,
+                String authorization
+        ) throws java.io.IOException {
+            String path = request.uri.getPath();
+            requests.add(path);
+            if ("/api/v1/publisher/deployments".equals(path)) {
+                return response(
+                        200,
+                        "{"
+                                + "\"deployments\":[{"
+                                + "\"deploymentId\":\""
+                                + DEPLOYMENT_ID + "\","
+                                + "\"deploymentName\":\""
+                                + "lockersm-java-v" + VERSION + "\","
+                                + "\"namespace\":\"io.locker\","
+                                + "\"deploymentState\":\"VALIDATED\""
+                                + "}],"
+                                + "\"page\":0,"
+                                + "\"pageSize\":20,"
+                                + "\"pageCount\":1,"
+                                + "\"totalResultCount\":1"
+                                + "}"
+                );
+            }
+            if ("/api/v1/publisher/status".equals(path)) {
+                return response(
+                        200,
+                        "{"
+                                + "\"deploymentId\":\""
+                                + DEPLOYMENT_ID + "\","
+                                + "\"deploymentState\":\"VALIDATED\""
+                                + "}"
+                );
+            }
+            if (path.startsWith(DOWNLOAD_PREFIX)) {
+                downloads++;
+                byte[] body = artifacts.get(
+                        path.substring(DOWNLOAD_PREFIX.length())
+                );
+                return new CentralPublisher.Response(
+                        body == null ? 404 : 200,
+                        body == null ? new byte[0] : body
+                );
+            }
+            if ("/api/v1/publisher/upload".equals(path)) {
+                uploadAttempted = true;
+            }
+            throw new java.io.IOException(
+                    "Unexpected Maven Central request: " + path
+            );
+        }
+
+        private static CentralPublisher.Response response(
+                int status,
+                String body
+        ) {
+            return new CentralPublisher.Response(
+                    status,
+                    body.getBytes(StandardCharsets.UTF_8)
+            );
+        }
     }
 }

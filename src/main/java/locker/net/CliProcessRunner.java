@@ -17,6 +17,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -47,6 +48,8 @@ final class CliProcessRunner {
     private static final Duration FORCE_TERMINATION_GRACE =
             Duration.ofSeconds(2);
     private static final long PROCESS_TREE_POLL_MILLIS = 10;
+    private static final ExecutorService PROCESS_IO =
+            Executors.newCachedThreadPool(new DaemonThreadFactory());
     private static final Set<String> SAFE_ENVIRONMENT_NAMES = new HashSet<>(
             Arrays.asList(
                     "ALL_PROXY",
@@ -80,13 +83,29 @@ final class CliProcessRunner {
     private final Duration timeout;
     private final int maxStdoutBytes;
     private final int maxStderrBytes;
+    private final ExecutionVerifier executionVerifier;
 
     CliProcessRunner(String binaryPath, Duration timeout) {
         this(
                 List.of(requireBinaryPath(binaryPath)),
                 timeout,
                 DEFAULT_MAX_STDOUT_BYTES,
-                DEFAULT_MAX_STDERR_BYTES
+                DEFAULT_MAX_STDERR_BYTES,
+                null
+        );
+    }
+
+    CliProcessRunner(
+            String binaryPath,
+            Duration timeout,
+            ExecutionVerifier executionVerifier
+    ) {
+        this(
+                List.of(requireBinaryPath(binaryPath)),
+                timeout,
+                DEFAULT_MAX_STDOUT_BYTES,
+                DEFAULT_MAX_STDERR_BYTES,
+                executionVerifier
         );
     }
 
@@ -95,6 +114,22 @@ final class CliProcessRunner {
             Duration timeout,
             int maxStdoutBytes,
             int maxStderrBytes
+    ) {
+        this(
+                launcher,
+                timeout,
+                maxStdoutBytes,
+                maxStderrBytes,
+                null
+        );
+    }
+
+    CliProcessRunner(
+            List<String> launcher,
+            Duration timeout,
+            int maxStdoutBytes,
+            int maxStderrBytes,
+            ExecutionVerifier executionVerifier
     ) {
         if (launcher == null || launcher.isEmpty()) {
             throw new IllegalArgumentException("CLI launcher must not be empty");
@@ -117,6 +152,7 @@ final class CliProcessRunner {
         this.timeout = timeout;
         this.maxStdoutBytes = maxStdoutBytes;
         this.maxStderrBytes = maxStderrBytes;
+        this.executionVerifier = executionVerifier;
     }
 
     Result execute(byte[] request) throws CliProcessException {
@@ -172,6 +208,8 @@ final class CliProcessRunner {
             );
         }
 
+        long deadline = executionDeadline();
+        verifyBeforeExecution(deadline);
         Path executable = resolveExecutable(launcher.get(0));
         List<String> command = new ArrayList<>(launcher);
         command.set(0, executable.toString());
@@ -181,7 +219,14 @@ final class CliProcessRunner {
 
         Process process;
         try {
+            remainingNanos(deadline);
             process = processBuilder.start();
+        } catch (TimeoutException exception) {
+            throw new CliProcessException(
+                    CliProcessException.Reason.TIMEOUT,
+                    "Locker CLI protocol request timed out",
+                    exception
+            );
         } catch (IOException exception) {
             throw new CliProcessException(
                     CliProcessException.Reason.START_FAILED,
@@ -190,33 +235,41 @@ final class CliProcessRunner {
             );
         }
 
-        ExecutorService executor = Executors.newFixedThreadPool(
-                4,
-                new DaemonThreadFactory()
-        );
         ProcessTreeTracker processTree = new ProcessTreeTracker(process);
-        Future<?> processTreeFuture = executor.submit(processTree);
-        Future<BoundedBytes> stdoutFuture = executor.submit(
+        CompletableFuture<OutputLimit> outputLimit =
+                new CompletableFuture<>();
+        Future<?> processTreeFuture = PROCESS_IO.submit(processTree);
+        Future<BoundedBytes> stdoutFuture = PROCESS_IO.submit(
                 readBounded(
                         process.getInputStream(),
-                        Math.min(maxStdoutBytes, maxResponseBytes)
+                        Math.min(maxStdoutBytes, maxResponseBytes),
+                        outputLimit,
+                        "Locker CLI protocol response exceeds "
+                                + "the output limit"
                 )
         );
-        Future<BoundedBytes> stderrFuture = executor.submit(
-                readBounded(process.getErrorStream(), maxStderrBytes)
+        Future<BoundedBytes> stderrFuture = PROCESS_IO.submit(
+                readBounded(
+                        process.getErrorStream(),
+                        maxStderrBytes,
+                        outputLimit,
+                        "Locker CLI diagnostics exceed the output limit"
+                )
         );
-        Future<Void> stdinFuture = executor.submit(
+        Future<Void> stdinFuture = PROCESS_IO.submit(
                 writeRequest(process.getOutputStream(), request)
         );
 
-        long deadline = System.nanoTime() + timeout.toNanos();
         try {
-            long waitNanos = remainingNanos(deadline);
-            if (!process.waitFor(waitNanos, TimeUnit.NANOSECONDS)) {
-                terminateTree(process, processTree);
+            OutputLimit earlyLimit = awaitProcessOrOutputLimit(
+                    process,
+                    outputLimit,
+                    deadline
+            );
+            if (earlyLimit != null) {
                 throw new CliProcessException(
-                        CliProcessException.Reason.TIMEOUT,
-                        "Locker CLI protocol request timed out"
+                        CliProcessException.Reason.OUTPUT_LIMIT,
+                        earlyLimit.message
                 );
             }
 
@@ -282,8 +335,28 @@ final class CliProcessRunner {
             }
             processTree.stop();
             processTreeFuture.cancel(true);
-            executor.shutdownNow();
+            stdoutFuture.cancel(true);
+            stderrFuture.cancel(true);
+            stdinFuture.cancel(true);
         }
+    }
+
+    private static OutputLimit awaitProcessOrOutputLimit(
+            Process process,
+            CompletableFuture<OutputLimit> outputLimit,
+            long deadline
+    ) throws InterruptedException, ExecutionException, TimeoutException {
+        Object completed = CompletableFuture.anyOf(
+                process.onExit(),
+                outputLimit
+        ).get(remainingNanos(deadline), TimeUnit.NANOSECONDS);
+        OutputLimit signalled = outputLimit.getNow(null);
+        if (signalled != null) {
+            return signalled;
+        }
+        return completed instanceof OutputLimit
+                ? (OutputLimit) completed
+                : null;
     }
 
     private static <T> T await(
@@ -307,6 +380,63 @@ final class CliProcessRunner {
         return remaining;
     }
 
+    private long executionDeadline() {
+        long now = System.nanoTime();
+        final long budget;
+        try {
+            budget = timeout.toNanos();
+        } catch (ArithmeticException exception) {
+            return Long.MAX_VALUE;
+        }
+        try {
+            return Math.addExact(now, budget);
+        } catch (ArithmeticException exception) {
+            return Long.MAX_VALUE;
+        }
+    }
+
+    private void verifyBeforeExecution(long deadline)
+            throws CliProcessException {
+        if (executionVerifier == null) {
+            return;
+        }
+        Future<Void> verification = PROCESS_IO.submit(() -> {
+            executionVerifier.verify(deadline);
+            return null;
+        });
+        try {
+            verification.get(
+                    remainingNanos(deadline),
+                    TimeUnit.NANOSECONDS
+            );
+        } catch (InterruptedException exception) {
+            verification.cancel(true);
+            Thread.currentThread().interrupt();
+            throw new CliProcessException(
+                    CliProcessException.Reason.INTERRUPTED,
+                    "Locker CLI verification was interrupted",
+                    exception
+            );
+        } catch (TimeoutException exception) {
+            verification.cancel(true);
+            throw new CliProcessException(
+                    CliProcessException.Reason.TIMEOUT,
+                    "Locker CLI verification exceeded the protocol timeout",
+                    exception
+            );
+        } catch (ExecutionException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof CliProcessException) {
+                throw (CliProcessException) cause;
+            }
+            throw new CliProcessException(
+                    CliProcessException.Reason.START_FAILED,
+                    "Managed Locker CLI failed pre-execution verification",
+                    cause == null ? exception : cause
+            );
+        }
+    }
+
     private static Callable<Void> writeRequest(OutputStream stream, byte[] request) {
         return () -> {
             try (OutputStream output = stream) {
@@ -317,7 +447,12 @@ final class CliProcessRunner {
         };
     }
 
-    private static Callable<BoundedBytes> readBounded(InputStream stream, int limit) {
+    private static Callable<BoundedBytes> readBounded(
+            InputStream stream,
+            int limit,
+            CompletableFuture<OutputLimit> outputLimit,
+            String overflowMessage
+    ) {
         return () -> {
             ByteArrayOutputStream output = new ByteArrayOutputStream(
                     Math.min(limit, 8192)
@@ -333,6 +468,10 @@ final class CliProcessRunner {
                     }
                     if (read > remaining) {
                         overflow = true;
+                        outputLimit.complete(
+                                new OutputLimit(overflowMessage)
+                        );
+                        break;
                     }
                 }
             }
@@ -533,6 +672,19 @@ final class CliProcessRunner {
             this.bytes = bytes;
             this.overflow = overflow;
         }
+    }
+
+    private static final class OutputLimit {
+        private final String message;
+
+        private OutputLimit(String message) {
+            this.message = message;
+        }
+    }
+
+    @FunctionalInterface
+    interface ExecutionVerifier {
+        void verify(long deadlineNanos) throws Exception;
     }
 
     /**

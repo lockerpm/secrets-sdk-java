@@ -68,6 +68,48 @@ public class CliProcessRunnerTest {
     }
 
     @Test
+    public void preExecutionVerificationUsesTheProcessTimeoutBudget()
+            throws Exception {
+        AtomicBoolean verifierInterrupted = new AtomicBoolean();
+        CliProcessRunner runner = new CliProcessRunner(
+                fixtureLauncher("echo"),
+                Duration.ofMillis(100),
+                4096,
+                4096,
+                deadlineNanos -> {
+                    try {
+                        Thread.sleep(30_000);
+                    } catch (InterruptedException exception) {
+                        verifierInterrupted.set(true);
+                        Thread.currentThread().interrupt();
+                        throw exception;
+                    }
+                }
+        );
+
+        long started = System.nanoTime();
+        CliProcessException exception = assertThrows(
+                CliProcessException.class,
+                () -> runner.execute(new byte[0])
+        );
+        long elapsedMillis = Duration.ofNanos(
+                System.nanoTime() - started
+        ).toMillis();
+
+        assertEquals(
+                CliProcessException.Reason.TIMEOUT,
+                exception.getReason()
+        );
+        assertTrue(elapsedMillis < 5_000);
+        for (int attempt = 0;
+             attempt < 100 && !verifierInterrupted.get();
+             attempt++) {
+            Thread.sleep(10);
+        }
+        assertTrue(verifierInterrupted.get());
+    }
+
+    @Test
     public void timeoutTerminatesRecordedDescendants() throws Exception {
         Path childPidFile = temporaryDirectory.resolve("child.pid");
         CliProcessRunner runner = fixtureRunner(
@@ -168,6 +210,34 @@ public class CliProcessRunnerTest {
     }
 
     @Test
+    public void terminatesUnboundedOutputBeforeTheRequestDeadline() {
+        CliProcessRunner runner = fixtureRunner(
+                "overflow-forever",
+                Duration.ofSeconds(10),
+                128,
+                128
+        );
+
+        long started = System.nanoTime();
+        CliProcessException exception = assertThrows(
+                CliProcessException.class,
+                () -> runner.execute(new byte[0])
+        );
+        long elapsedMillis = Duration.ofNanos(
+                System.nanoTime() - started
+        ).toMillis();
+
+        assertEquals(
+                CliProcessException.Reason.OUTPUT_LIMIT,
+                exception.getReason()
+        );
+        assertTrue(
+                elapsedMillis < 5_000,
+                "output overflow waited for the request deadline"
+        );
+    }
+
+    @Test
     public void rejectsStdoutLimitAboveProtocolHardCap() {
         assertThrows(
                 IllegalArgumentException.class,
@@ -247,6 +317,22 @@ public class CliProcessRunnerTest {
             int stderrLimit,
             String... extraJvmArguments
     ) {
+        List<String> launcher = fixtureLauncher(
+                mode,
+                extraJvmArguments
+        );
+        return new CliProcessRunner(
+                launcher,
+                timeout,
+                stdoutLimit,
+                stderrLimit
+        );
+    }
+
+    private static List<String> fixtureLauncher(
+            String mode,
+            String... extraJvmArguments
+    ) {
         String executable = Path.of(
                 System.getProperty("java.home"),
                 "bin",
@@ -259,12 +345,7 @@ public class CliProcessRunnerTest {
         launcher.add("-cp");
         launcher.add(System.getProperty("java.class.path"));
         launcher.add(CliProcessFixture.class.getName());
-        return new CliProcessRunner(
-                launcher,
-                timeout,
-                stdoutLimit,
-                stderrLimit
-        );
+        return launcher;
     }
 
     private static boolean awaitProcessExit(

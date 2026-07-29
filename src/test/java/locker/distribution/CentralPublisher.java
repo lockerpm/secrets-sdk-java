@@ -65,6 +65,8 @@ public final class CentralPublisher {
     private static final Duration POLL_INTERVAL =
             Duration.ofSeconds(5);
     private static final int MAX_STATUS_POLLS = 360;
+    private static final int MAX_RECOVERY_POLLS = 24;
+    private static final int DEPLOYMENT_LOOKUP_PAGE_SIZE = 20;
     private static final int MAX_RESPONSE_BYTES = 1024 * 1024;
     private static final int MAX_CREDENTIAL_CHARACTERS = 4096;
     private static final long MAX_BUNDLE_BYTES =
@@ -74,6 +76,8 @@ public final class CentralPublisher {
                     "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
                             + "[0-9a-f]{4}-[0-9a-f]{12}$"
             );
+    private static final Pattern CENTRAL_RELATIVE_PATH =
+            Pattern.compile("^[A-Za-z0-9._/-]+$");
 
     private final Transport transport;
     private final Sleeper sleeper;
@@ -116,10 +120,13 @@ public final class CentralPublisher {
                     password
             );
             if ("stage".equals(arguments[0])) {
-                publisher.stage(
+                publisher.stageVerified(
                         Path.of(arguments[1]),
                         Path.of(arguments[2]),
-                        System.getenv("CI_COMMIT_TAG")
+                        System.getenv("LOCKER_RELEASE_TAG"),
+                        requiredEnvironmentPath(
+                                "MAVEN_GPG_KEY_FILE"
+                        )
                 );
             } else {
                 publisher.publish(Path.of(arguments[1]));
@@ -132,7 +139,56 @@ public final class CentralPublisher {
             Path deploymentIdOutput,
             String releaseTag
     ) throws Exception {
+        stage(
+                bundle,
+                deploymentIdOutput,
+                releaseTag,
+                deploymentId -> {
+                }
+        );
+    }
+
+    void stageVerified(
+            Path bundle,
+            Path deploymentIdOutput,
+            String releaseTag,
+            Path signingKey
+    ) throws Exception {
         String checkedTag = requireReleaseTag(releaseTag);
+        CentralPublicReconciler.ExpectedRelease expected =
+                CentralPublicReconciler.ExpectedRelease.fromBundle(
+                        bundle,
+                        checkedTag.substring(1),
+                        signingKey
+                );
+        try {
+            stage(
+                    bundle,
+                    deploymentIdOutput,
+                    checkedTag,
+                    deploymentId -> verifyDeployment(
+                            expected,
+                            deploymentId
+                    )
+            );
+        } finally {
+            expected.erase();
+        }
+    }
+
+    void stage(
+            Path bundle,
+            Path deploymentIdOutput,
+            String releaseTag,
+            DeploymentVerifier deploymentVerifier
+    ) throws Exception {
+        String checkedTag = requireReleaseTag(releaseTag);
+        String deploymentName = "lockersm-java-" + checkedTag;
+        java.util.Objects.requireNonNull(
+                deploymentVerifier,
+                "deploymentVerifier"
+        );
+        requireDeploymentIdOutputAvailable(deploymentIdOutput);
         byte[] bundleBytes = readRegularFile(
                 bundle,
                 MAX_BUNDLE_BYTES,
@@ -141,74 +197,122 @@ public final class CentralPublisher {
         byte[] prefix = null;
         byte[] suffix = null;
         try {
-            String boundary = "locker-central-"
-                    + UUID.randomUUID().toString().replace("-", "");
-            prefix = (
-                    "--" + boundary + "\r\n"
-                            + "Content-Disposition: form-data; "
-                            + "name=\"bundle\"; "
-                            + "filename=\"central-bundle.zip\"\r\n"
-                            + "Content-Type: application/octet-stream\r\n"
-                            + "\r\n"
-            ).getBytes(StandardCharsets.US_ASCII);
-            suffix = (
-                    "\r\n--" + boundary + "--\r\n"
-            ).getBytes(StandardCharsets.US_ASCII);
-            long contentLength = Math.addExact(
-                    Math.addExact(
-                            (long) prefix.length,
-                            bundleBytes.length
-                    ),
-                    suffix.length
+            String deploymentId = findUniqueDeployment(
+                    deploymentName
             );
-            HttpRequest.BodyPublisher multipart =
-                    HttpRequest.BodyPublishers.fromPublisher(
-                            HttpRequest.BodyPublishers.ofByteArrays(
-                                    List.of(
-                                            prefix,
-                                            bundleBytes,
-                                            suffix
-                                    )
-                            ),
-                            contentLength
-                    );
-            URI uploadUri = centralUri(
-                    "/api/v1/publisher/upload"
-                            + "?publishingType=USER_MANAGED"
-                            + "&name="
-                            + encodeQueryValue(
-                            "lockersm-java-" + checkedTag
-                    )
-            );
-            Response response = transport.send(
-                    new Request(
-                            "POST",
-                            uploadUri,
-                            "multipart/form-data; boundary=" + boundary,
-                            multipart,
-                            UPLOAD_TIMEOUT
-                    ),
-                    authorization
-            );
-            String deploymentId;
-            try {
-                requireHttpStatus(
-                        response,
-                        201,
-                        "Maven Central bundle upload"
+            if (deploymentId == null) {
+                String boundary = "locker-central-"
+                        + UUID.randomUUID().toString()
+                        .replace("-", "");
+                prefix = (
+                        "--" + boundary + "\r\n"
+                                + "Content-Disposition: form-data; "
+                                + "name=\"bundle\"; "
+                                + "filename=\"central-bundle.zip\"\r\n"
+                                + "Content-Type: "
+                                + "application/octet-stream\r\n"
+                                + "\r\n"
+                ).getBytes(StandardCharsets.US_ASCII);
+                suffix = (
+                        "\r\n--" + boundary + "--\r\n"
+                ).getBytes(StandardCharsets.US_ASCII);
+                long contentLength = Math.addExact(
+                        Math.addExact(
+                                (long) prefix.length,
+                                bundleBytes.length
+                        ),
+                        suffix.length
                 );
-                deploymentId = parseDeploymentId(response.body);
-            } finally {
-                response.erase();
+                HttpRequest.BodyPublisher multipart =
+                        HttpRequest.BodyPublishers.fromPublisher(
+                                HttpRequest.BodyPublishers.ofByteArrays(
+                                        List.of(
+                                                prefix,
+                                                bundleBytes,
+                                                suffix
+                                        )
+                                ),
+                                contentLength
+                        );
+                URI uploadUri = centralUri(
+                        "/api/v1/publisher/upload"
+                                + "?publishingType=USER_MANAGED"
+                                + "&name="
+                                + encodeQueryValue(deploymentName)
+                );
+                Response response;
+                try {
+                    response = transport.send(
+                            new Request(
+                                    "POST",
+                                    uploadUri,
+                                    "multipart/form-data; boundary="
+                                            + boundary,
+                                    multipart,
+                                    UPLOAD_TIMEOUT
+                            ),
+                            authorization
+                    );
+                } catch (IOException exception) {
+                    deploymentId = recoverAmbiguousUpload(
+                            deploymentName,
+                            exception
+                    );
+                    response = null;
+                }
+                if (response != null) {
+                    try {
+                        if (response.statusCode == 201) {
+                            try {
+                                deploymentId = parseDeploymentId(
+                                        response.body
+                                );
+                            } catch (IOException exception) {
+                                deploymentId = recoverAmbiguousUpload(
+                                        deploymentName,
+                                        exception
+                                );
+                            }
+                        } else if (response.statusCode == 429
+                                || response.statusCode >= 500) {
+                            deploymentId = recoverAmbiguousUpload(
+                                    deploymentName,
+                                    new IOException(
+                                            "Maven Central bundle upload "
+                                                    + "returned ambiguous "
+                                                    + "HTTP status "
+                                                    + response.statusCode
+                                    )
+                            );
+                        } else {
+                            requireHttpStatus(
+                                    response,
+                                    201,
+                                    "Maven Central bundle upload"
+                            );
+                            throw new AssertionError(
+                                    "Unreachable upload status"
+                            );
+                        }
+                    } finally {
+                        response.erase();
+                    }
+                }
+            } else {
+                System.out.println(
+                        "Recovered Maven Central deployment: "
+                                + deploymentId
+                );
             }
 
             writeDeploymentId(
                     deploymentIdOutput,
                     deploymentId
             );
-            waitUntilValidated(deploymentId);
+            waitUntilReadyForPublication(deploymentId);
+            deploymentVerifier.verify(deploymentId);
             System.out.println(
-                    "Maven Central deployment validated: "
+                    "Maven Central deployment ready and verified: "
                             + deploymentId
             );
         } finally {
@@ -220,6 +324,158 @@ public final class CentralPublisher {
                 Arrays.fill(suffix, (byte) 0);
             }
         }
+    }
+
+    private String findUniqueDeployment(String deploymentName)
+            throws Exception {
+        URI lookup = centralUri(
+                "/api/v1/publisher/deployments"
+                        + "?namespace=io.locker"
+                        + "&deploymentName="
+                        + encodeQueryValue(deploymentName)
+                        + "&page=0"
+                        + "&size=" + DEPLOYMENT_LOOKUP_PAGE_SIZE
+                        + "&sortField=createTimestamp"
+                        + "&sortDirection=desc"
+        );
+        Response response = transport.send(
+                new Request(
+                        "GET",
+                        lookup,
+                        null,
+                        HttpRequest.BodyPublishers.noBody(),
+                        REQUEST_TIMEOUT
+                ),
+                authorization
+        );
+        try {
+            requireHttpStatus(
+                    response,
+                    200,
+                    "Maven Central deployment lookup"
+            );
+            return parseDeploymentLookup(
+                    response.body,
+                    deploymentName
+            );
+        } finally {
+            response.erase();
+        }
+    }
+
+    private String recoverAmbiguousUpload(
+            String deploymentName,
+            IOException uploadFailure
+    ) throws Exception {
+        IOException lastLookupFailure = null;
+        for (int poll = 0; poll < MAX_RECOVERY_POLLS; poll++) {
+            try {
+                String deploymentId = findUniqueDeployment(
+                        deploymentName
+                );
+                if (deploymentId != null) {
+                    return deploymentId;
+                }
+                lastLookupFailure = null;
+            } catch (InterruptedException exception) {
+                throw exception;
+            } catch (IOException exception) {
+                lastLookupFailure = exception;
+            }
+            if (poll + 1 < MAX_RECOVERY_POLLS) {
+                sleeper.sleep(POLL_INTERVAL.toMillis());
+            }
+        }
+        IOException failure = new IOException(
+                "Maven Central upload result is ambiguous and no "
+                        + "uniquely named deployment became visible",
+                uploadFailure
+        );
+        if (lastLookupFailure != null) {
+            failure.addSuppressed(lastLookupFailure);
+        }
+        throw failure;
+    }
+
+    private void verifyDeployment(
+            CentralPublicReconciler.ExpectedRelease expected,
+            String deploymentId
+    ) throws Exception {
+        requireDeploymentId(deploymentId);
+        CentralPublicReconciler.State state =
+                new CentralPublicReconciler().inspectAt(
+                        expected,
+                        (uri, maximumSize) -> {
+                            if (maximumSize < 1
+                                    || maximumSize > MAX_BUNDLE_BYTES) {
+                                throw new IOException(
+                                        "Maven Central deployment "
+                                                + "artifact bound is invalid"
+                                );
+                            }
+                            Response response = transport.send(
+                                    new Request(
+                                            "GET",
+                                            uri,
+                                            null,
+                                            HttpRequest.BodyPublishers
+                                                    .noBody(),
+                                            REQUEST_TIMEOUT,
+                                            (int) maximumSize
+                                    ),
+                                    authorization
+                            );
+                            try {
+                                return new CentralPublicReconciler.Response(
+                                        response.statusCode,
+                                        response.body
+                                );
+                            } finally {
+                                response.erase();
+                            }
+                        },
+                        relativePath -> deploymentArtifactUri(
+                                deploymentId,
+                                relativePath
+                        )
+                );
+        if (state != CentralPublicReconciler.State.EXACT) {
+            throw new IOException(
+                    "Maven Central deployment does not contain the "
+                            + "exact verified release"
+            );
+        }
+    }
+
+    private static URI deploymentArtifactUri(
+            String deploymentId,
+            String relativePath
+    ) {
+        try {
+            requireDeploymentId(deploymentId);
+        } catch (IOException exception) {
+            throw new IllegalArgumentException(
+                    "Maven Central deployment identifier is invalid",
+                    exception
+            );
+        }
+        if (relativePath == null
+                || !CENTRAL_RELATIVE_PATH.matcher(
+                relativePath
+        ).matches()
+                || relativePath.startsWith("/")
+                || relativePath.contains("..")
+                || relativePath.contains("//")) {
+            throw new IllegalArgumentException(
+                    "Maven Central deployment artifact path is invalid"
+            );
+        }
+        return centralUri(
+                "/api/v1/publisher/deployment/"
+                        + deploymentId
+                        + "/download/"
+                        + relativePath
+        );
     }
 
     void publish(Path deploymentIdFile) throws Exception {
@@ -280,12 +536,14 @@ public final class CentralPublisher {
         );
     }
 
-    private void waitUntilValidated(String deploymentId)
+    private void waitUntilReadyForPublication(String deploymentId)
             throws Exception {
         for (int poll = 0; poll < MAX_STATUS_POLLS; poll++) {
             DeploymentState state = requestStatus(deploymentId);
             switch (state) {
                 case VALIDATED:
+                case PUBLISHING:
+                case PUBLISHED:
                     return;
                 case PENDING:
                 case VALIDATING:
@@ -446,6 +704,146 @@ public final class CentralPublisher {
             }
         }
         return state;
+    }
+
+    static String parseDeploymentLookup(
+            byte[] responseBytes,
+            String expectedDeploymentName
+    ) throws IOException {
+        if (expectedDeploymentName == null
+                || expectedDeploymentName.isBlank()
+                || !expectedDeploymentName.equals(
+                expectedDeploymentName.trim()
+        )
+                || expectedDeploymentName.length() > 200) {
+            throw new IllegalArgumentException(
+                    "Expected Maven Central deployment name is invalid"
+            );
+        }
+        JsonElement parsed;
+        try {
+            parsed = StrictJson.parse(responseBytes, 32);
+        } catch (CliDistributionException exception) {
+            throw new IOException(
+                    "Maven Central returned invalid deployment-list JSON",
+                    exception
+            );
+        }
+        if (!parsed.isJsonObject()) {
+            throw new IOException(
+                    "Maven Central deployment list must be an object"
+            );
+        }
+        JsonObject object = parsed.getAsJsonObject();
+        JsonElement deploymentsElement = object.get("deployments");
+        if (deploymentsElement == null
+                || !deploymentsElement.isJsonArray()) {
+            throw new IOException(
+                    "Maven Central deployment list is missing deployments"
+            );
+        }
+        int page = requireJsonInteger(object, "page");
+        int pageSize = requireJsonInteger(object, "pageSize");
+        int pageCount = requireJsonInteger(object, "pageCount");
+        int total = requireJsonInteger(
+                object,
+                "totalResultCount"
+        );
+        JsonArray deployments = deploymentsElement.getAsJsonArray();
+        if (page != 0
+                || pageSize < 1
+                || pageSize > DEPLOYMENT_LOOKUP_PAGE_SIZE
+                || pageCount < 0
+                || pageCount > 1
+                || total != deployments.size()) {
+            throw new IOException(
+                    "Maven Central deployment lookup is incomplete"
+            );
+        }
+
+        String match = null;
+        for (JsonElement element : deployments) {
+            if (!element.isJsonObject()) {
+                throw new IOException(
+                        "Maven Central deployment entry must be an object"
+                );
+            }
+            JsonObject deployment = element.getAsJsonObject();
+            String deploymentId = requireJsonString(
+                    deployment,
+                    "deploymentId"
+            );
+            requireDeploymentId(deploymentId);
+            String deploymentName = requireJsonString(
+                    deployment,
+                    "deploymentName"
+            );
+            String namespace = requireJsonString(
+                    deployment,
+                    "namespace"
+            );
+            String state = requireJsonString(
+                    deployment,
+                    "deploymentState"
+            );
+            try {
+                if (!DeploymentState.valueOf(state).name().equals(
+                        state
+                )) {
+                    throw new IllegalArgumentException(
+                            "noncanonical deployment state"
+                    );
+                }
+            } catch (IllegalArgumentException exception) {
+                throw new IOException(
+                        "Maven Central deployment list contains "
+                                + "an unknown state",
+                        exception
+                );
+            }
+            if (expectedDeploymentName.equals(deploymentName)) {
+                if (!"io.locker".equals(namespace)
+                        || match != null) {
+                    throw new IOException(
+                            "Maven Central deployment-name recovery "
+                                    + "is ambiguous"
+                    );
+                }
+                match = deploymentId;
+            }
+        }
+        return match;
+    }
+
+    private static int requireJsonInteger(
+            JsonObject object,
+            String name
+    ) throws IOException {
+        JsonElement element = object.get(name);
+        if (element == null
+                || !element.isJsonPrimitive()
+                || !element.getAsJsonPrimitive().isNumber()) {
+            throw new IOException(
+                    "Maven Central deployment list " + name
+                            + " must be an integer"
+            );
+        }
+        String value = element.getAsString();
+        if (!value.matches("^(?:0|[1-9][0-9]*)$")) {
+            throw new IOException(
+                    "Maven Central deployment list " + name
+                            + " is not a canonical integer"
+            );
+        }
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException exception) {
+            throw new IOException(
+                    "Maven Central deployment list " + name
+                            + " is outside its integer bound",
+                    exception
+            );
+        }
     }
 
     private static String requireJsonString(
@@ -662,10 +1060,48 @@ public final class CentralPublisher {
                 value.substring(1)
         )) {
             throw new IllegalArgumentException(
-                    "CI_COMMIT_TAG must be a canonical v-prefixed SemVer"
+                    "LOCKER_RELEASE_TAG must be a canonical v-prefixed SemVer"
             );
         }
         return value;
+    }
+
+    private static Path requiredEnvironmentPath(String name) {
+        String value = System.getenv(name);
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException(
+                    name + " is required for Maven Central release"
+            );
+        }
+        return Path.of(value);
+    }
+
+    private static void requireDeploymentIdOutputAvailable(
+            Path output
+    ) throws IOException {
+        Path absolute = output.toAbsolutePath().normalize();
+        Path parent = absolute.getParent();
+        if (parent == null) {
+            throw new IOException(
+                    "Maven Central deployment identifier parent is missing"
+            );
+        }
+        BasicFileAttributes parentAttributes = Files.readAttributes(
+                parent,
+                BasicFileAttributes.class,
+                LinkOption.NOFOLLOW_LINKS
+        );
+        if (!parentAttributes.isDirectory()) {
+            throw new IOException(
+                    "Maven Central deployment identifier parent "
+                            + "must be a real directory"
+            );
+        }
+        if (Files.exists(absolute, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException(
+                    "Maven Central deployment identifier already exists"
+            );
+        }
     }
 
     private static void requireDeploymentId(String value)
@@ -897,6 +1333,11 @@ public final class CentralPublisher {
         void sleep(long milliseconds) throws InterruptedException;
     }
 
+    @FunctionalInterface
+    interface DeploymentVerifier {
+        void verify(String deploymentId) throws Exception;
+    }
+
     interface Transport {
         Response send(
                 Request request,
@@ -910,6 +1351,7 @@ public final class CentralPublisher {
         final String contentType;
         final HttpRequest.BodyPublisher body;
         final Duration timeout;
+        final int maximumResponseBytes;
 
         Request(
                 String method,
@@ -918,11 +1360,36 @@ public final class CentralPublisher {
                 HttpRequest.BodyPublisher body,
                 Duration timeout
         ) {
+            this(
+                    method,
+                    uri,
+                    contentType,
+                    body,
+                    timeout,
+                    MAX_RESPONSE_BYTES
+            );
+        }
+
+        Request(
+                String method,
+                URI uri,
+                String contentType,
+                HttpRequest.BodyPublisher body,
+                Duration timeout,
+                int maximumResponseBytes
+        ) {
+            if (maximumResponseBytes < 1
+                    || maximumResponseBytes > MAX_BUNDLE_BYTES) {
+                throw new IllegalArgumentException(
+                        "Maven Central response bound is invalid"
+                );
+            }
             this.method = method;
             this.uri = uri;
             this.contentType = contentType;
             this.body = body;
             this.timeout = timeout;
+            this.maximumResponseBytes = maximumResponseBytes;
         }
     }
 
@@ -996,7 +1463,10 @@ public final class CentralPublisher {
             );
             byte[] body;
             try (InputStream stream = response.body()) {
-                body = readBounded(stream, MAX_RESPONSE_BYTES);
+                int maximum = response.statusCode() == 200
+                        ? request.maximumResponseBytes
+                        : MAX_RESPONSE_BYTES;
+                body = readBounded(stream, maximum);
             }
             return new Response(response.statusCode(), body);
         }

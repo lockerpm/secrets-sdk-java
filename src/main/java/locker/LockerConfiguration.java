@@ -1,5 +1,7 @@
 package locker;
 
+import java.util.regex.Pattern;
+
 /**
  * Runtime configuration shared by the Locker Java SDK.
  *
@@ -10,7 +12,20 @@ package locker;
  * release validation compares it with an independently protected key.
  */
 public final class LockerConfiguration {
-    public static final String SDK_VERSION = "1.0.0";
+    private static final Pattern STABLE_VERSION = Pattern.compile(
+            "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)"
+                    + "\\.(0|[1-9][0-9]*)$"
+    );
+
+    /**
+     * Version embedded into the built SDK artifact.
+     *
+     * <p>Packaged releases read this from the JAR manifest generated from
+     * Maven's CI-friendly {@code revision}. Exploded Maven test classes use
+     * the same project version through a system property. Source code never
+     * contains a second manually maintained release version.
+     */
+    public static final String SDK_VERSION = resolveSdkVersion();
     public static final String CLI_PATH_ENVIRONMENT_VARIABLE =
             "LOCKER_CLI_PATH";
 
@@ -31,6 +46,30 @@ public final class LockerConfiguration {
 
     public String getSdkVersion() {
         return SDK_VERSION;
+    }
+
+    private static String resolveSdkVersion() {
+        Package runtimePackage = LockerConfiguration.class.getPackage();
+        String artifactVersion = runtimePackage == null
+                ? null
+                : runtimePackage.getImplementationVersion();
+        if (isStableVersion(artifactVersion)) {
+            return artifactVersion;
+        }
+
+        String buildVersion = System.getProperty("locker.sdk.version");
+        if (isStableVersion(buildVersion)) {
+            return buildVersion;
+        }
+        throw new ExceptionInInitializerError(
+                "Locker SDK artifact version metadata is missing or invalid"
+        );
+    }
+
+    private static boolean isStableVersion(String value) {
+        return value != null
+                && value.equals(value.trim())
+                && STABLE_VERSION.matcher(value).matches();
     }
 
     /**

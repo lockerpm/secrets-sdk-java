@@ -23,8 +23,11 @@ import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -457,6 +460,95 @@ public class SdkProtocolClientTest {
     }
 
     @Test
+    public void managedCliIsReverifiedBeforeEveryProcessExecution()
+            throws Exception {
+        Path managedArtifact = Files.createTempFile(
+                "locker-java-managed-cli-",
+                ".bin"
+        );
+        byte[] original = new byte[4096];
+        for (int index = 0; index < original.length; index++) {
+            original[index] = (byte) index;
+        }
+        Files.write(managedArtifact, original);
+        byte[] expectedDigest = MessageDigest.getInstance("SHA-256")
+                .digest(original);
+        Arrays.fill(original, (byte) 0);
+        FileTime originalMtime =
+                Files.getLastModifiedTime(managedArtifact);
+        AtomicInteger verificationCount = new AtomicInteger();
+        try {
+            CliProcessRunner runner = new CliProcessRunner(
+                    fixtureLauncher("success"),
+                    Duration.ofSeconds(5),
+                    1 << 20,
+                    1 << 16,
+                    deadlineNanos -> {
+                        verificationCount.incrementAndGet();
+                        byte[] observed =
+                                Files.readAllBytes(managedArtifact);
+                        byte[] digest = MessageDigest
+                                .getInstance("SHA-256")
+                                .digest(observed);
+                        Arrays.fill(observed, (byte) 0);
+                        boolean verified = MessageDigest.isEqual(
+                                expectedDigest,
+                                digest
+                        );
+                        Arrays.fill(digest, (byte) 0);
+                        if (!verified) {
+                            throw new CliRunError(
+                                    "Managed Locker CLI failed signed "
+                                            + "cache verification"
+                            );
+                        }
+                    }
+            );
+            byte[] capabilitiesRequest = (
+                    "{\"jsonrpc\":\"2.0\",\"id\":\"managed-test\","
+                            + "\"method\":\"system.capabilities\","
+                            + "\"params\":{}}"
+            ).getBytes(StandardCharsets.UTF_8);
+            CliProcessRunner.Result first = runner.execute(
+                    capabilitiesRequest
+            );
+            assertEquals(0, first.getExitCode());
+            first.clear();
+            assertEquals(1, verificationCount.get());
+
+            byte[] tampered = Files.readAllBytes(managedArtifact);
+            tampered[tampered.length - 1] ^= 1;
+            Files.write(managedArtifact, tampered);
+            Arrays.fill(tampered, (byte) 0);
+            Files.setLastModifiedTime(
+                    managedArtifact,
+                    originalMtime
+            );
+            assertEquals(4096, Files.size(managedArtifact));
+            assertEquals(
+                    originalMtime,
+                    Files.getLastModifiedTime(managedArtifact)
+            );
+
+            CliProcessException failure = assertThrows(
+                    CliProcessException.class,
+                    () -> runner.execute(capabilitiesRequest)
+            );
+            assertTrue(
+                    failure
+                            .getMessage()
+                            .contains("pre-execution verification"),
+                    failure::getMessage
+            );
+            assertEquals(2, verificationCount.get());
+            Arrays.fill(capabilitiesRequest, (byte) 0);
+        } finally {
+            Arrays.fill(expectedDigest, (byte) 0);
+            Files.deleteIfExists(managedArtifact);
+        }
+    }
+
+    @Test
     public void concurrentReplacementCannotMixCapabilitySnapshots()
             throws Exception {
         AtomicReference<String> identity =
@@ -550,6 +642,10 @@ public class SdkProtocolClientTest {
         List<String> launcher = new ArrayList<>();
         launcher.add(executable);
         launcher.add("-Dlocker.fixture.mode=" + mode);
+        launcher.add(
+                "-Dlocker.fixture.sdkVersion="
+                        + System.getProperty("locker.sdk.version")
+        );
         launcher.add("-cp");
         launcher.add(System.getProperty("java.class.path"));
         launcher.add(SdkProtocolFixture.class.getName());

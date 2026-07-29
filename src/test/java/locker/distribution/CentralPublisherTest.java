@@ -21,6 +21,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class CentralPublisherTest {
     private static final String DEPLOYMENT_ID =
             "28570f16-da32-4c14-bd2e-c1acc0782365";
+    private static final String OTHER_DEPLOYMENT_ID =
+            "11111111-1111-1111-1111-111111111111";
+    private static final String DEPLOYMENT_NAME =
+            "lockersm-java-v1.2.3";
 
     @TempDir
     Path temporaryDirectory;
@@ -29,6 +33,7 @@ public class CentralPublisherTest {
     public void stagesExactBundleAndPersistsBoundDeployment()
             throws Exception {
         FakeTransport transport = new FakeTransport(
+                response(200, deploymentLookupJson()),
                 response(201, DEPLOYMENT_ID),
                 response(200, statusJson("VALIDATING")),
                 response(200, statusJson("VALIDATED"))
@@ -58,9 +63,19 @@ public class CentralPublisherTest {
                 DEPLOYMENT_ID + "\n",
                 Files.readString(identifier, StandardCharsets.US_ASCII)
         );
-        assertEquals(3, transport.requests.size());
+        assertEquals(4, transport.requests.size());
         assertEquals(1, sleeps[0]);
-        RecordedRequest upload = transport.requests.get(0);
+        RecordedRequest lookup = transport.requests.get(0);
+        assertEquals("GET", lookup.request.method);
+        assertEquals(
+                "/api/v1/publisher/deployments",
+                lookup.request.uri.getPath()
+        );
+        assertTrue(
+                lookup.request.uri.getQuery()
+                        .contains("deploymentName=" + DEPLOYMENT_NAME)
+        );
+        RecordedRequest upload = transport.requests.get(1);
         assertEquals("POST", upload.request.method);
         assertEquals(
                 "/api/v1/publisher/upload",
@@ -88,6 +103,82 @@ public class CentralPublisherTest {
                 ),
                 upload.authorization
         );
+    }
+
+    @Test
+    public void recoversUploadWhenTheAcceptedResponseIsLost()
+            throws Exception {
+        FakeTransport transport = new FakeTransport(
+                response(200, deploymentLookupJson()),
+                new IOException("connection lost after upload"),
+                response(
+                        200,
+                        deploymentLookupJson(DEPLOYMENT_ID)
+                ),
+                response(200, statusJson("VALIDATING")),
+                response(200, statusJson("VALIDATED"))
+        );
+        int[] sleeps = {0};
+        String[] verified = {null};
+        CentralPublisher publisher = new CentralPublisher(
+                transport,
+                milliseconds -> sleeps[0]++,
+                "token-user",
+                "token-password"
+        );
+        Path bundle = writeBundle();
+        Path identifier = temporaryDirectory.resolve(
+                "central-deployment-id"
+        );
+
+        publisher.stage(
+                bundle,
+                identifier,
+                "v1.2.3",
+                deploymentId -> verified[0] = deploymentId
+        );
+
+        assertEquals(DEPLOYMENT_ID, verified[0]);
+        assertEquals(
+                DEPLOYMENT_ID + "\n",
+                Files.readString(identifier, StandardCharsets.US_ASCII)
+        );
+        assertEquals(5, transport.requests.size());
+        assertEquals(1, sleeps[0]);
+        assertEquals(
+                "/api/v1/publisher/upload",
+                transport.requests.get(1).request.uri.getPath()
+        );
+        assertEquals(
+                "/api/v1/publisher/deployments",
+                transport.requests.get(2).request.uri.getPath()
+        );
+    }
+
+    @Test
+    public void refusesAmbiguousDeterministicDeploymentName()
+            throws Exception {
+        FakeTransport transport = new FakeTransport(
+                response(
+                        200,
+                        deploymentLookupJson(
+                                DEPLOYMENT_ID,
+                                OTHER_DEPLOYMENT_ID
+                        )
+                )
+        );
+
+        assertThrows(
+                IOException.class,
+                () -> publisher(transport).stage(
+                        writeBundle(),
+                        temporaryDirectory.resolve(
+                                "central-deployment-id"
+                        ),
+                        "v1.2.3"
+                )
+        );
+        assertEquals(1, transport.requests.size());
     }
 
     @Test
@@ -127,6 +218,7 @@ public class CentralPublisherTest {
     public void persistsDeploymentIdBeforeValidationFailure()
             throws Exception {
         FakeTransport transport = new FakeTransport(
+                response(200, deploymentLookupJson()),
                 response(201, DEPLOYMENT_ID),
                 response(200, statusJson("FAILED"))
         );
@@ -252,7 +344,7 @@ public class CentralPublisherTest {
     public void refusesToOverwriteDeploymentIdentifier()
             throws Exception {
         FakeTransport transport = new FakeTransport(
-                response(201, DEPLOYMENT_ID)
+                response(200, deploymentLookupJson())
         );
         Path bundle = temporaryDirectory.resolve(
                 "central-bundle.zip"
@@ -282,6 +374,7 @@ public class CentralPublisherTest {
                         StandardCharsets.US_ASCII
                 )
         );
+        assertTrue(transport.requests.isEmpty());
     }
 
     private CentralPublisher publisher(FakeTransport transport) {
@@ -306,6 +399,18 @@ public class CentralPublisherTest {
         return identifier;
     }
 
+    private Path writeBundle() throws Exception {
+        Path bundle = temporaryDirectory.resolve(
+                "central-bundle.zip"
+        );
+        Files.writeString(
+                bundle,
+                "verified-bundle",
+                StandardCharsets.US_ASCII
+        );
+        return bundle;
+    }
+
     private static CentralPublisher.Response response(
             int status,
             String body
@@ -323,15 +428,42 @@ public class CentralPublisherTest {
                 + "}";
     }
 
+    private static String deploymentLookupJson(String... identifiers) {
+        StringBuilder deployments = new StringBuilder();
+        for (int index = 0; index < identifiers.length; index++) {
+            if (index > 0) {
+                deployments.append(',');
+            }
+            deployments.append('{')
+                    .append("\"deploymentId\":\"")
+                    .append(identifiers[index])
+                    .append("\",")
+                    .append("\"deploymentName\":\"")
+                    .append(DEPLOYMENT_NAME)
+                    .append("\",")
+                    .append("\"namespace\":\"io.locker\",")
+                    .append("\"deploymentState\":\"VALIDATED\"")
+                    .append('}');
+        }
+        return "{"
+                + "\"deployments\":[" + deployments + "],"
+                + "\"page\":0,"
+                + "\"pageSize\":20,"
+                + "\"pageCount\":"
+                + (identifiers.length == 0 ? 0 : 1) + ","
+                + "\"totalResultCount\":" + identifiers.length
+                + "}";
+    }
+
     private static final class FakeTransport
             implements CentralPublisher.Transport {
-        private final Deque<CentralPublisher.Response> responses =
+        private final Deque<Object> responses =
                 new ArrayDeque<>();
         private final List<RecordedRequest> requests =
                 new ArrayList<>();
 
         private FakeTransport(
-                CentralPublisher.Response... queuedResponses
+                Object... queuedResponses
         ) {
             responses.addAll(List.of(queuedResponses));
         }
@@ -345,13 +477,16 @@ public class CentralPublisherTest {
                     request,
                     authorization
             ));
-            CentralPublisher.Response response = responses.pollFirst();
-            if (response == null) {
+            Object next = responses.pollFirst();
+            if (next == null) {
                 throw new IOException(
                         "No fake Maven Central response is available"
                 );
             }
-            return response;
+            if (next instanceof IOException) {
+                throw (IOException) next;
+            }
+            return (CentralPublisher.Response) next;
         }
     }
 

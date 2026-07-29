@@ -81,6 +81,15 @@ secret aliases in this precedence order:
 Explicit client configuration takes precedence over every environment
 variable. New deployments should use only the canonical `LOCKER_*` names.
 
+| Environment variable | Purpose |
+| --- | --- |
+| `LOCKER_ACCESS_KEY_ID` | Project access key ID |
+| `LOCKER_SECRET_ACCESS_KEY` | Project secret access key |
+| `LOCKER_CLI_PATH` | Absolute caller-owned CLI path |
+
+Configure a cloud or self-hosted API base with `setApiBase`; Java does not
+implicitly read an API-base environment variable.
+
 The default client reads those values when it executes an operation:
 
 ```java
@@ -150,6 +159,18 @@ update cannot later permit rollback or same-version equivocation. A transient
 fallback gets a 60-second retry marker without advancing the six-hour success
 interval.
 
+Immediately before every CLI subprocess spawn, the SDK cryptographically
+rebinds the selected managed executable to its signed manifest, streamed
+size/SHA-256, and executable header within the operation timeout. The detached
+Ed25519 signature is verified when a generation is installed or first loaded
+into the process; subsequent same-generation rebinds use a bounded 8 KiB
+buffer instead of retaining the binary in memory. File identity metadata is
+only a capability-cache optimization and is never a managed-binary trust
+decision. A same-size in-place modification is rejected even if its mtime is
+restored; the active generation is not silently repaired in that execution
+path. Explicit absolute paths remain caller-owned and receive only the
+documented regular-file/identity checks, not managed-channel validation.
+
 Only DNS/connect/timeout transport failures and HTTP 408, 425, 429, or
 500..599 may fall back to a completely verified cache. TLS/certificate,
 signature, schema, executable-header, hash, size, rollback, state, and other
@@ -159,16 +180,47 @@ new one recoverable offline.
 
 ## Release safety
 
-The release pipeline accepts only a protected canonical `v<SDK_VERSION>`
-SemVer tag. Its automatic `release-readiness` job requires:
+Every merge commit pushed to the protected `main` branch is released
+automatically. Tag pipelines are ignored, so the tag created at the end of a
+successful release cannot recursively start another pipeline. Direct,
+fast-forward, squash, and rebased updates to the release line fail closed:
+each first-parent commit after the reviewed baseline must have exactly two
+parents.
 
-- a protected, independent `LOCKER_CLI_PUBLIC_KEY_FILE` file variable
-  containing exactly one canonical base64url-encoded raw 32-byte Ed25519
-  public key and one final LF, byte-equal to the committed trust root;
+Concurrent main pipelines share the `lockersm-maven-central` resource group.
+Configure that group once with GitLab process mode `oldest_first`; for example,
+a Maintainer can call `PUT /projects/:id/resource_groups/lockersm-maven-central`
+with `process_mode=oldest_first` through the GitLab API after the group first
+appears. Keep the predecessor-tag gate enabled as the authoritative release
+order invariant: every release after the first polls for its exact predecessor
+tag and requires it to resolve to the immediately preceding first-parent
+merge. Because a tag is created only after the predecessor is byte-for-byte
+public on Maven Central, a newer pipeline cannot publish out of order even if
+external GitLab scheduling is misconfigured.
+
+The version is derived deterministically from first-parent merge distance.
+The first eligible merge is `1.0.0`, the next is `1.0.1`, and so on. Maven's
+CI-friendly `revision` property is the single source of the base version; the
+published flattened POM and JAR manifest contain the resolved release version,
+and runtime protocol metadata reads that manifest rather than a separately
+maintained constant or file.
+
+The protected `auto-release` job requires:
+
+- protected-main governance that rejects `[ci skip]` and `[skip ci]` commit
+  messages and rejects the `ci.skip` and `ci.no_pipeline` Git push options
+  (use a project push rule or a self-managed GitLab pre-receive hook), so no
+  release-line merge can bypass its mandatory pipeline;
+- a protected, masked `LOCKER_CLI_RELEASE_PUBLIC_KEY` variable containing
+  exactly one canonical base64url-encoded raw 32-byte Ed25519 public key,
+  without spaces or a trailing newline, byte-equal to the committed trust
+  root;
 - a protected `MAVEN_GPG_KEY_FILE` file variable and masked
   `MAVEN_GPG_PASSPHRASE`;
-- masked `MAVEN_CENTRAL_USERNAME` and `MAVEN_CENTRAL_PASSWORD` variables for
-  the later publish job.
+- masked `MAVEN_CENTRAL_USERNAME` and `MAVEN_CENTRAL_PASSWORD` variables
+  containing the Central Portal-generated user-token pair, not the account
+  password. The release client uses the documented Central Portal form
+  (`Authorization: Bearer <base64(user:token)>`).
 
 Release validation fails closed when `LICENSE` is absent or empty, the tag
 does not equal `v` plus the POM/SDK version, the public key is malformed, or
@@ -178,16 +230,23 @@ main resource by filesystem path, never through the test classpath, and the
 Central bundle builder independently verifies the entry in the exact JAR
 bytes it packages.
 
-The `release` Maven profile signs one artifact set, after which the
-release-readiness job builds and verifies one Central deployment bundle
-without network publication. CI records that bundle's SHA-256 and
-source/tag/profile attestation. A protected manual staging job revalidates and
-uploads those exact bytes as a `USER_MANAGED` Central deployment, waits for
-`VALIDATED`, and persists the bound deployment ID. A separate protected manual
-publish job promotes only that ID and waits for `PUBLISHED`; neither job
-rebuilds or re-uploads the release bundle.
+The `release` Maven profile signs one artifact set. CI builds and independently
+verifies the resulting Central deployment bundle, records its SHA-256,
+and checks the exact public Maven coordinates before any upload. If that
+version is absent, CI makes one upload attempt, waits for `VALIDATED`, promotes
+that deployment, and then waits until every expected public payload is
+byte-identical. It requires Central's MD5/SHA-1 public payload sidecars and
+verifies SHA-256/SHA-512 sidecars whenever Central exposes them; the
+authenticated pre-publication deployment must preserve all four submitted
+payload sidecars byte-for-byte. Detached OpenPGP signatures include a creation
+timestamp, so
+their armor is not compared byte-for-byte: each local and public signature
+must instead verify the exact payload with SHA-512 and the precise fingerprint
+derived from `MAVEN_GPG_KEY_FILE`. This lets a rerun safely skip an already
+public release without accepting a different signer. A partial or conflicting
+public version never triggers another upload.
 
-The staging and publish jobs use a test-scope Java release client rather than
+The release job uses a test-scope Java release client rather than
 putting an authorization header in a shell command. It reads Central
 credentials only from the protected environment, rejects delimiters and
 control characters, never logs them, refuses redirects, bounds every response,
@@ -195,12 +254,31 @@ and parses status JSON strictly. Duplicate or escaped-duplicate fields,
 trailing data, non-string identifiers/states, unknown states, and a response
 whose deployment ID does not exactly match the persisted ID all fail closed.
 
-The Central upload endpoint has no caller-supplied idempotency key. Do not
-retry a staging job blindly after its upload starts: first inspect the
-persisted `central-deployment-id` artifact and Central Portal, otherwise a
-failed runner can leave an orphaned user-managed deployment. Protect both
-Maven Central environments, the SemVer tag pattern, and every listed variable
-in GitLab project settings.
+The Central upload endpoint has no caller-supplied idempotency key. Before
+uploading, CI therefore searches the authenticated deployment list for the
+deterministic release name. After an ambiguous upload response it polls that
+same name, accepts exactly one matching deployment, and fails closed if more
+than one exists. A recovered deployment is not trusted by name alone: after
+validation, CI downloads every payload and detached signature by deployment
+ID, requires byte-identical payloads and checksum sidecars, and
+cryptographically verifies the signatures against the protected signing key.
+Central explicitly does not require checksum sidecars for `.asc` signature
+files, so the bundle omits that unnecessary file-count overhead. This makes
+the bounded GitLab retry safe when a runner or network connection is lost.
+Once Central is
+byte-for-byte public, CI creates or exactly reconciles the GitLab tag and
+Release as its final mutation using the built-in `CI_JOB_TOKEN`. Protect the
+`main` branch, `v*` tags, the `maven-central` environment, and every listed variable in
+GitLab project settings.
+
+After the first pipeline creates the resource group, a Maintainer must run:
+
+```shell
+curl --request PUT \
+  --header "PRIVATE-TOKEN: <maintainer-token>" \
+  --data "process_mode=oldest_first" \
+  "https://git.cystack.org/api/v4/projects/<project-id>/resource_groups/lockersm-maven-central"
+```
 
 Do not hard-code credentials or secret values in source code. The SDK starts
 the child CLI with a small operating-system/proxy/certificate environment
@@ -387,6 +465,26 @@ String value = client.secrets().retrieve(
 );
 ```
 
+### Timeout, interruption, retry, and cache
+
+`setCliTimeout` bounds each capability or vault protocol process and its
+immediate managed-binary rebind. Initial managed installation has separate,
+bounded connect, response, download, and interprocess-lock deadlines.
+Interrupting the calling thread terminates the known CLI process tree and
+restores the interrupt flag.
+
+The SDK never automatically retries a vault RPC. Create and update are issued
+once because a lost response can leave the remote commit outcome unknown.
+Applications may inspect `LockerError.getRetryable()` and apply bounded retry
+only to read-only operations.
+
+The Java SDK does not keep plaintext secret values. Vault caching is delegated
+to the CLI's encrypted, revision-aware cache using protocol defaults; this
+version does not expose Java cache overrides. A transient outage can reuse
+only a still-fresh cache last validated successfully by the server.
+Authentication, authorization, TLS, integrity, malformed-response, and local
+storage failures fail closed.
+
 ## Error handling
 
 All SDK exceptions extend `LockerError`. Operation errors are mapped from the
@@ -458,6 +556,25 @@ LOCKER_INTEGRATION_CLI=/path/to/locker \
 Live functional tests require `LOCKER_TEST_ACCESS_KEY_ID` and
 `LOCKER_TEST_SECRET_ACCESS_KEY`. They are intentionally separate from the
 default unit-test suite; never commit real credentials to test sources.
+
+## Migration, troubleshooting, and support
+
+Version 1 is the stable protocol-v1 boundary. Replace direct REST calls,
+human-output parsing, relative CLI names, and legacy credential variables
+with typed services, an explicit absolute CLI path or managed mode, and
+canonical `LOCKER_*` credentials.
+
+- Authentication/permission errors: verify the complete credential pair and
+  its project/environment scope.
+- `CliDistributionException`: check system time, HTTPS access to
+  `files.locker.io`, and private ownership below `~/.locker/sdk-cli/java`.
+- `CliRunError`: check the absolute CLI path and configured timeout; never log
+  application arguments that may contain secret values.
+- Protocol errors: upgrade the SDK and CLI together or remove an incompatible
+  explicit `LOCKER_CLI_PATH`.
+
+Product help is available at [support.locker.io](https://support.locker.io).
+Report vulnerabilities privately to <contact@locker.io>.
 
 ## License
 

@@ -240,7 +240,14 @@ public final class SdkProtocolFixture {
         require(credentials, "secret_access_key", "fake-secret-key");
         JsonObject client = context.getAsJsonObject("client");
         require(client, "name", "locker-java");
-        require(client, "version", "1.0.0");
+        String expectedSdkVersion = System.getProperty(
+                "locker.fixture.sdkVersion"
+        );
+        if (expectedSdkVersion == null
+                || expectedSdkVersion.isBlank()) {
+            throw new IllegalArgumentException("SDK version");
+        }
+        require(client, "version", expectedSdkVersion);
         JsonObject transport = context.getAsJsonObject("transport");
         require(
                 transport.getAsJsonObject("headers"),

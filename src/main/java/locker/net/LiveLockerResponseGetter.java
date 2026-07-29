@@ -136,10 +136,25 @@ public class LiveLockerResponseGetter implements LockerResponseGetter {
                         "Locker CLI timeout must be positive"
                 );
             }
+            String configuredPath = options == null
+                    ? null
+                    : options.getCliPath();
             SdkProtocolClient client = new SdkProtocolClient(
                     new CliProcessRunner(
                             cliPath,
-                            timeout
+                            timeout,
+                            deadlineNanos -> {
+                                String verifiedPath = cliResolver.resolve(
+                                        configuredPath
+                                );
+                                if (!cliPath.equals(verifiedPath)) {
+                                    throw new CliRunError(
+                                            "The verified managed Locker CLI "
+                                                    + "generation changed "
+                                                    + "before execution"
+                                    );
+                                }
+                            }
                     )
             );
             protocolBinding = new ClientBinding(cliPath, client);

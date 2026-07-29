@@ -22,6 +22,9 @@ public final class CliProcessFixture {
             case "overflow":
                 overflow();
                 return;
+            case "overflow-forever":
+                overflowForever();
+                return;
             case "spawn":
                 spawnChild(false);
                 return;
@@ -48,6 +51,14 @@ public final class CliProcessFixture {
     private static void overflow() throws IOException {
         byte[] bytes = new byte[4096];
         System.out.write(bytes);
+    }
+
+    private static void overflowForever() {
+        byte[] bytes = new byte[4096];
+        while (true) {
+            System.out.write(bytes, 0, bytes.length);
+            System.out.flush();
+        }
     }
 
     private static void spawnChild(boolean exitAfterTrackerSample)

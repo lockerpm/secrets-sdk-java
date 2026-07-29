@@ -16,6 +16,7 @@ import java.nio.file.attribute.AclEntry;
 import java.nio.file.attribute.AclEntryPermission;
 import java.nio.file.attribute.AclEntryType;
 import java.nio.file.attribute.AclFileAttributeView;
+import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
@@ -431,7 +432,10 @@ public class LockerCliInstallerV2Test {
         );
 
         assertTrue(
-                failure.getMessage().contains("ELF"),
+                failure.getCause() != null
+                        && failure.getCause()
+                        .getMessage()
+                        .contains("ELF"),
                 failure::getMessage
         );
     }
@@ -453,6 +457,63 @@ public class LockerCliInstallerV2Test {
                 CliDistributionException.class,
                 context.installer::resolve
         );
+    }
+
+    @Test
+    public void activeBinarySameSizeTamperFailsClosedBeforeNetwork()
+            throws Exception {
+        TestContext context = context("2.0.7");
+        Path installed = context.installer.resolve();
+        long originalSize = Files.size(installed);
+        FileTime originalMtime = Files.getLastModifiedTime(installed);
+        byte[] tampered = Files.readAllBytes(installed);
+        tampered[tampered.length - 1] ^= 1;
+        Files.write(installed, tampered);
+        Arrays.fill(tampered, (byte) 0);
+        Files.setLastModifiedTime(installed, originalMtime);
+
+        assertEquals(originalSize, Files.size(installed));
+        assertEquals(originalMtime, Files.getLastModifiedTime(installed));
+        CliDistributionException failure = assertThrows(
+                CliDistributionException.class,
+                context.installer::resolve
+        );
+        assertTrue(
+                failure.getMessage().contains(
+                        "active managed Locker CLI failed signed "
+                                + "integrity verification"
+                ),
+                failure::getMessage
+        );
+        assertEquals(4, context.transport.requestCount());
+    }
+
+    @Test
+    public void hotRebindStreamsHashWithoutRepeatingRawSignature()
+            throws Exception {
+        TestContext context = context("2.0.7");
+        Path installed = context.installer.resolve();
+        Path signaturePath = installed.resolveSibling("locker.sig");
+        byte[] changedSignature = Files.readAllBytes(signaturePath);
+        changedSignature[0] ^= 1;
+        Files.write(signaturePath, changedSignature);
+        Arrays.fill(changedSignature, (byte) 0);
+
+        assertEquals(installed, context.installer.resolve());
+        assertEquals(4, context.transport.requestCount());
+
+        LockerCliInstaller coldCacheLoader = new LockerCliInstaller(
+                context.transport,
+                context.clock::get,
+                temporaryDirectory,
+                PlatformIdentity.from("linux", "amd64"),
+                context.fixture.publicKey
+        );
+        assertThrows(
+                CliDistributionException.class,
+                coldCacheLoader::resolve
+        );
+        assertEquals(4, context.transport.requestCount());
     }
 
     @Test

@@ -31,20 +31,49 @@ final class CiSupplyChainTest {
                 MUTABLE_BOOTSTRAP.matcher(pipeline).find(),
                 "CI must not bootstrap tools through mutable OS downloads");
         assertTrue(
-                pipeline.contains("LOCKER_CLI_PUBLIC_KEY_FILE"),
+                pipeline.contains("LOCKER_CLI_RELEASE_PUBLIC_KEY"),
                 "release CI must require an independent CLI trust root");
         assertTrue(
-                pipeline.split("cache: \\[\\]", -1).length - 1 >= 3,
-                "release jobs must not consume a shared Maven cache");
+                pipeline.contains("workflow:"),
+                "release CI must define pipeline-level tag suppression");
         assertTrue(
                 pipeline.contains(".m2/release-${CI_JOB_ID}"),
                 "release jobs must isolate their local Maven repositories");
+        assertTrue(
+                pipeline.contains("- cs_newgen_docker"),
+                "all jobs must use the approved Docker runner");
+        assertTrue(
+                pipeline.contains("retry:\n    max: 2"),
+                "release recovery must use only a bounded retry");
+        assertTrue(
+                pipeline.contains("- runner_system_failure")
+                        && pipeline.contains("- script_failure")
+                        && pipeline.contains(
+                        "- stuck_or_timeout_failure"
+                ),
+                "release retry must cover ambiguous runner and script loss");
+        assertTrue(
+                pipeline.contains("wait-predecessor-tag"),
+                "release jobs must wait for their first-parent predecessor");
+        assertTrue(
+                pipeline.contains(
+                        "resource_group: lockersm-maven-central"
+                ),
+                "release jobs must serialize through the Central resource group");
         assertFalse(
                 pipeline.contains("(?:"),
                 "GitLab rules use RE2 and must not contain PCRE non-capturing groups");
         assertTrue(
                 pom.contains("<requireReleaseDeps>"),
                 "Maven Enforcer must reject snapshot dependencies");
+        assertTrue(
+                pom.contains(
+                        "<artifactId>flatten-maven-plugin</artifactId>"
+                ),
+                "published POMs must resolve CI-friendly version fields");
+        assertTrue(
+                pom.contains("<version>${revision}</version>"),
+                "the Maven project must use one CI-friendly revision");
         assertFalse(pom.contains("-SNAPSHOT"), "the reviewed build graph must not contain snapshots");
     }
 

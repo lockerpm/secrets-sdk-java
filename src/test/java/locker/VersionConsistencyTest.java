@@ -7,20 +7,14 @@ import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathFactory;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class VersionConsistencyTest {
     @Test
     public void keepsReleaseMetadataAligned() throws Exception {
-        String releaseVersion = Files.readString(
-                Path.of("VERSION"),
-                StandardCharsets.UTF_8
-        ).trim();
-
         DocumentBuilderFactory factory =
                 DocumentBuilderFactory.newInstance();
         factory.setFeature(
@@ -55,8 +49,25 @@ public class VersionConsistencyTest {
                         pom,
                         XPathConstants.STRING
                 );
+        String defaultRevision = (String) XPathFactory
+                .newInstance()
+                .newXPath()
+                .evaluate(
+                        "/*[local-name()='project']"
+                                + "/*[local-name()='properties']"
+                                + "/*[local-name()='revision']/text()",
+                        pom,
+                        XPathConstants.STRING
+                );
+        String buildVersion = System.getProperty(
+                "locker.sdk.version"
+        );
 
-        assertEquals(releaseVersion, pomVersion.trim());
-        assertEquals(releaseVersion, LockerConfiguration.SDK_VERSION);
+        assertEquals("${revision}", pomVersion.trim());
+        assertTrue(defaultRevision.matches(
+                "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)"
+                        + "\\.(0|[1-9][0-9]*)$"
+        ));
+        assertEquals(buildVersion, LockerConfiguration.SDK_VERSION);
     }
 }

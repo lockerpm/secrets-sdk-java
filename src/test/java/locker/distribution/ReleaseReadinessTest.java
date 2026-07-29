@@ -134,7 +134,7 @@ public class ReleaseReadinessTest {
         String expectedKeyPath = requireEnvironment(
                 "LOCKER_CLI_PUBLIC_KEY_FILE"
         );
-        String tag = requireEnvironment("CI_COMMIT_TAG");
+        String tag = requireEnvironment("LOCKER_RELEASE_TAG");
         String sdkVersion = System.getProperty("locker.sdk.version");
 
         ReleaseReadinessVerifier.verify(

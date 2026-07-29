@@ -1,10 +1,25 @@
 image: "maven:3.9.16-eclipse-temurin-11@sha256:1fee93ca227db7e8b8c7c72752ada0f03da6ebab40addd6fe48ac6293424186c"
 
 stages:
-  - quality
-  - release-verify
-  - central-stage
-  - publish
+  - validate
+  - release
+
+workflow:
+  # A protected-main merge is a release. Do not cancel an older release while
+  # a newer merge is validating, and never recurse from the generated tag.
+  auto_cancel:
+    on_new_commit: none
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE == "push"'
+      when: never
+    - if: '$CI_COMMIT_BRANCH'
+
+default:
+  tags:
+    - cs_newgen_docker
 
 variables:
   MAVEN_OPTS: >-
@@ -26,183 +41,229 @@ cache:
   policy: pull-push
 
 quality:
-  stage: quality
+  stage: validate
   script:
     - mvn ${MAVEN_CLI_OPTS} clean verify
-    - export SDK_VERSION="$(tr -d '\r\n' < VERSION)"
+    - >-
+      SDK_VERSION="$(mvn ${MAVEN_CLI_OPTS} -q
+      -DforceStdout help:evaluate
+      -Dexpression=project.version)"
+    - test -n "$SDK_VERSION"
     - jar tf "target/lockersm-${SDK_VERSION}.jar" | grep -Fx META-INF/LICENSE
     - jar tf "target/lockersm-${SDK_VERSION}.jar" | grep -Fx locker-cli-ed25519-public-key.txt
     - jar tf "target/lockersm-${SDK_VERSION}-sources.jar" | grep -Fx META-INF/LICENSE
     - jar tf "target/lockersm-${SDK_VERSION}-sources.jar" | grep -Fx locker-cli-ed25519-public-key.txt
     - jar tf "target/lockersm-${SDK_VERSION}-javadoc.jar" | grep -Fx resources/LICENSE
+    - test -s .flattened-pom.xml
+    - "! grep -F '${revision}' .flattened-pom.xml"
     - git diff --check
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-    - if: '$CI_COMMIT_TAG'
 
-release-readiness:
-  stage: release-verify
-  cache: []
+release-policy:
+  stage: validate
   variables:
-    MAVEN_OPTS: >-
-      -Dmaven.repo.local=.m2/release-${CI_JOB_ID}
-      -Dfile.encoding=UTF-8
-  needs:
-    - job: quality
-      artifacts: false
+    GIT_DEPTH: "0"
   script:
-    - >-
-      test -n "${LOCKER_CLI_PUBLIC_KEY_FILE:-}" ||
-      { echo "missing protected CI variable: LOCKER_CLI_PUBLIC_KEY_FILE" >&2; exit 1; }
-    - >-
-      test -s "$LOCKER_CLI_PUBLIC_KEY_FILE" ||
-      { echo "LOCKER_CLI_PUBLIC_KEY_FILE must reference a nonempty file" >&2; exit 1; }
-    - >-
-      test -n "${MAVEN_GPG_KEY_FILE:-}" ||
-      { echo "missing protected CI variable: MAVEN_GPG_KEY_FILE" >&2; exit 1; }
-    - >-
-      test -s "$MAVEN_GPG_KEY_FILE" ||
-      { echo "MAVEN_GPG_KEY_FILE must reference a nonempty file" >&2; exit 1; }
-    - >-
-      test -n "${MAVEN_GPG_PASSPHRASE:-}" ||
-      { echo "missing protected CI variable: MAVEN_GPG_PASSPHRASE" >&2; exit 1; }
-    - test -s LICENSE
+    - git --version
     - >-
       mvn ${MAVEN_CLI_OPTS}
-      -Prelease
-      -Dlocker.release.validation=true
-      -Dgpg.keyFilePath="$MAVEN_GPG_KEY_FILE"
-      -Dproject.build.outputTimestamp="$CI_COMMIT_TIMESTAMP"
-      clean verify
-    - export SDK_VERSION="$(tr -d '\r\n' < VERSION)"
-    - mkdir -p release-dist
-    - >-
-      mvn ${MAVEN_CLI_OPTS}
-      -Dexec.classpathScope=test
-      -Dexec.mainClass=locker.distribution.CentralBundleBuilder
-      -Dexec.args="$CI_PROJECT_DIR $SDK_VERSION
-      $CI_PROJECT_DIR/release-dist/central-bundle.zip
-      $CI_COMMIT_TIMESTAMP $LOCKER_CLI_PUBLIC_KEY_FILE"
-      exec:java
-    - cp "$LOCKER_CLI_PUBLIC_KEY_FILE" release-dist/locker-cli-ed25519-public-key.txt
-    - >-
-      (cd release-dist &&
-      sha256sum central-bundle.zip locker-cli-ed25519-public-key.txt > SHA256SUMS)
-    - printf '%s\n' "$CI_COMMIT_SHA" > release-dist/source-commit
-    - printf '%s\n' "$CI_COMMIT_TAG" > release-dist/release-tag
-    - printf '%s\n' "$SDK_VERSION" > release-dist/sdk-version
-    - printf '%s\n' "release" > release-dist/maven-profile
-  artifacts:
-    name: lockersm-java-release-${CI_COMMIT_SHA}
-    paths:
-      - release-dist/
-    expire_in: 14 days
-  rules:
-    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_TAG =~ /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?$/'
-    - when: never
-
-stage-maven-central:
-  stage: central-stage
-  cache: []
-  variables:
-    MAVEN_OPTS: >-
-      -Dmaven.repo.local=.m2/release-${CI_JOB_ID}
-      -Dfile.encoding=UTF-8
-  interruptible: false
-  resource_group: maven-central
-  needs:
-    - job: release-readiness
-      artifacts: true
-  environment:
-    name: maven-central-staging
-    deployment_tier: staging
-  script:
-    - test -s LICENSE
-    - test "$(cat release-dist/source-commit)" = "$CI_COMMIT_SHA"
-    - test "$(cat release-dist/release-tag)" = "$CI_COMMIT_TAG"
-    - test "$(cat release-dist/sdk-version)" = "$(tr -d '\r\n' < VERSION)"
-    - test "$(cat release-dist/maven-profile)" = "release"
-    - (cd release-dist && sha256sum --check SHA256SUMS)
-    - export LOCKER_CLI_PUBLIC_KEY_FILE="$CI_PROJECT_DIR/release-dist/locker-cli-ed25519-public-key.txt"
-    - >-
-      mvn ${MAVEN_CLI_OPTS}
-      -Dlocker.release.validation=true
-      '-Dtest=locker.distribution.ReleaseReadinessTest#validatesProtectedCiReleaseInputs'
+      -Dtest=locker.distribution.ReleaseVersionToolTest
       test
-    - >-
-      test -n "${MAVEN_CENTRAL_USERNAME:-}" ||
-      { echo "missing protected CI variable: MAVEN_CENTRAL_USERNAME" >&2; exit 1; }
-    - >-
-      test -n "${MAVEN_CENTRAL_PASSWORD:-}" ||
-      { echo "missing protected CI variable: MAVEN_CENTRAL_PASSWORD" >&2; exit 1; }
-    - |
-      stage_status=0
-      mvn ${MAVEN_CLI_OPTS} \
-        -Dexec.classpathScope=test \
-        -Dexec.mainClass=locker.distribution.CentralPublisher \
-        -Dexec.args="stage release-dist/central-bundle.zip release-dist/central-deployment-id" \
-        exec:java ||
-        stage_status=$?
-      if [ -s release-dist/central-deployment-id ]; then
-        (cd release-dist &&
-          sha256sum central-deployment-id >> SHA256SUMS)
-      fi
-      exit "$stage_status"
-  artifacts:
-    when: always
-    name: lockersm-java-central-stage-${CI_COMMIT_SHA}
-    paths:
-      - release-dist/
-    expire_in: 14 days
-  rules:
-    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_TAG =~ /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?$/'
-      when: manual
-      allow_failure: false
-    - when: never
 
-publish-maven-central:
-  stage: publish
+auto-release:
+  stage: release
+  resource_group: lockersm-maven-central
   cache: []
+  interruptible: false
+  timeout: 2h
+  # Deterministic deployment-name recovery and exact artifact verification
+  # make a bounded retry safe after a lost runner or ambiguous HTTP response.
+  retry:
+    max: 2
+    when:
+      - api_failure
+      - runner_system_failure
+      - scheduler_failure
+      - script_failure
+      - stuck_or_timeout_failure
+  dependencies: []
   variables:
+    GIT_DEPTH: "0"
     MAVEN_OPTS: >-
       -Dmaven.repo.local=.m2/release-${CI_JOB_ID}
       -Dfile.encoding=UTF-8
-  interruptible: false
-  resource_group: maven-central
-  needs:
-    - job: stage-maven-central
-      artifacts: true
   environment:
     name: maven-central
     deployment_tier: production
+  before_script:
+    - git --version
   script:
-    - test -s LICENSE
-    - test "$(cat release-dist/source-commit)" = "$CI_COMMIT_SHA"
-    - test "$(cat release-dist/release-tag)" = "$CI_COMMIT_TAG"
-    - test "$(cat release-dist/sdk-version)" = "$(tr -d '\r\n' < VERSION)"
-    - test "$(cat release-dist/maven-profile)" = "release"
-    - (cd release-dist && sha256sum --check SHA256SUMS)
-    - export LOCKER_CLI_PUBLIC_KEY_FILE="$CI_PROJECT_DIR/release-dist/locker-cli-ed25519-public-key.txt"
-    - >-
-      mvn ${MAVEN_CLI_OPTS}
-      -Dlocker.release.validation=true
-      '-Dtest=locker.distribution.ReleaseReadinessTest#validatesProtectedCiReleaseInputs'
-      test
-    - >-
-      test -n "${MAVEN_CENTRAL_USERNAME:-}" ||
-      { echo "missing protected CI variable: MAVEN_CENTRAL_USERNAME" >&2; exit 1; }
-    - >-
-      test -n "${MAVEN_CENTRAL_PASSWORD:-}" ||
-      { echo "missing protected CI variable: MAVEN_CENTRAL_PASSWORD" >&2; exit 1; }
+    - |
+      release_error=0
+      if [ "${CI_COMMIT_REF_PROTECTED:-}" != "true" ]; then
+        echo "default branch must be protected before release" >&2
+        release_error=1
+      fi
+      if [ "${CI_DEFAULT_BRANCH:-}" != "main" ]; then
+        echo "main must remain the GitLab default branch" >&2
+        release_error=1
+      fi
+      for variable in \
+        LOCKER_CLI_RELEASE_PUBLIC_KEY \
+        MAVEN_GPG_KEY_FILE \
+        MAVEN_GPG_PASSPHRASE \
+        MAVEN_CENTRAL_USERNAME \
+        MAVEN_CENTRAL_PASSWORD
+      do
+        eval "value=\${$variable:-}"
+        if [ -z "$value" ]; then
+          echo "missing protected CI variable: $variable" >&2
+          release_error=1
+        fi
+      done
+      if [ -n "${MAVEN_GPG_KEY_FILE:-}" ] &&
+         { [ ! -f "$MAVEN_GPG_KEY_FILE" ] ||
+           [ -L "$MAVEN_GPG_KEY_FILE" ] ||
+           [ ! -s "$MAVEN_GPG_KEY_FILE" ]; }
+      then
+        echo "MAVEN_GPG_KEY_FILE must be a nonempty regular file" >&2
+        release_error=1
+      fi
+      if [ -n "${LOCKER_CLI_RELEASE_PUBLIC_KEY:-}" ]; then
+        if [ "${#LOCKER_CLI_RELEASE_PUBLIC_KEY}" -ne 43 ]; then
+          echo "LOCKER_CLI_RELEASE_PUBLIC_KEY has an invalid length" >&2
+          release_error=1
+        fi
+        case "$LOCKER_CLI_RELEASE_PUBLIC_KEY" in
+          *[!A-Za-z0-9_-]*)
+            echo "LOCKER_CLI_RELEASE_PUBLIC_KEY must be one base64url line" >&2
+            release_error=1
+            ;;
+        esac
+      fi
+      exit "$release_error"
+    - git fetch --force --tags origin
+    # Compile only the test-scope release tools at the reviewed base revision.
+    - mvn ${MAVEN_CLI_OPTS} -DskipTests test-compile
+    # Configure this resource group's process mode to oldest_first once in
+    # GitLab. The predecessor tag remains the authoritative release-order gate.
     - >-
       mvn ${MAVEN_CLI_OPTS}
       -Dexec.classpathScope=test
-      -Dexec.mainClass=locker.distribution.CentralPublisher
-      -Dexec.args="publish release-dist/central-deployment-id"
+      -Dexec.mainClass=locker.distribution.ReleaseVersionTool
+      -Dexec.args="wait-predecessor-tag $CI_PROJECT_DIR origin
+      $CI_COMMIT_SHA $CI_PROJECT_DIR/scripts/release-policy.json"
       exec:java
+    # Import a predecessor tag that may have appeared while this job waited.
+    - git fetch --force --tags origin
+    - >-
+      mvn ${MAVEN_CLI_OPTS}
+      -Dexec.classpathScope=test
+      -Dexec.mainClass=locker.distribution.ReleaseVersionTool
+      -Dexec.args="prepare $CI_PROJECT_DIR $CI_COMMIT_SHA
+      $CI_PROJECT_DIR/scripts/release-policy.json
+      $CI_PROJECT_DIR/release.env"
+      exec:java
+    - set -a
+    - . ./release.env
+    - set +a
+    - mkdir -p release-dist
+    - unset LOCKER_DISABLED_GPG_KEY_ENV LOCKER_DISABLED_GPG_FINGERPRINT_ENV
+    - >-
+      printf '%s\n' "$LOCKER_CLI_RELEASE_PUBLIC_KEY" >
+      release-dist/locker-cli-ed25519-public-key.txt
+    - export LOCKER_CLI_PUBLIC_KEY_FILE="$CI_PROJECT_DIR/release-dist/locker-cli-ed25519-public-key.txt"
+    # A conflicting tag must fail before Maven Central receives any bytes.
+    - >-
+      mvn ${MAVEN_CLI_OPTS}
+      -Dexec.classpathScope=test
+      -Dexec.mainClass=locker.distribution.ReleaseVersionTool
+      -Dexec.args="verify-remote-tag $CI_PROJECT_DIR origin
+      $LOCKER_RELEASE_TAG $CI_COMMIT_SHA"
+      exec:java
+    - >-
+      mvn ${MAVEN_CLI_OPTS}
+      -Drevision="$LOCKER_SDK_VERSION"
+      -Prelease
+      -Dlocker.release.validation=true
+      -Dgpg.keyFilePath="$MAVEN_GPG_KEY_FILE"
+      -Dproject.build.outputTimestamp="$SOURCE_DATE_EPOCH"
+      clean verify
+    - test -s .flattened-pom.xml
+    - "! grep -F '${revision}' .flattened-pom.xml"
+    - jar tf "target/lockersm-${LOCKER_SDK_VERSION}.jar" | grep -Fx META-INF/LICENSE
+    - jar tf "target/lockersm-${LOCKER_SDK_VERSION}.jar" | grep -Fx locker-cli-ed25519-public-key.txt
+    - >-
+      mvn ${MAVEN_CLI_OPTS}
+      -Drevision="$LOCKER_SDK_VERSION"
+      -Dexec.classpathScope=test
+      -Dexec.mainClass=locker.distribution.CentralBundleBuilder
+      -Dexec.args="$CI_PROJECT_DIR $LOCKER_SDK_VERSION
+      $CI_PROJECT_DIR/release-dist/central-bundle.zip
+      $CI_COMMIT_TIMESTAMP $LOCKER_CLI_PUBLIC_KEY_FILE"
+      exec:java
+    - >-
+      (cd release-dist &&
+      sha256sum central-bundle.zip
+      locker-cli-ed25519-public-key.txt > SHA256SUMS)
+    # Public exact reconciliation makes an already-published rerun safe.
+    - >-
+      mvn ${MAVEN_CLI_OPTS}
+      -Drevision="$LOCKER_SDK_VERSION"
+      -Dexec.classpathScope=test
+      -Dexec.mainClass=locker.distribution.CentralPublicReconciler
+      -Dexec.args="preflight
+      $CI_PROJECT_DIR/release-dist/central-bundle.zip
+      $LOCKER_SDK_VERSION
+      $MAVEN_GPG_KEY_FILE
+      $CI_PROJECT_DIR/release-dist/central-public-state"
+      exec:java
+    - |
+      central_state="$(tr -d '\r\n' < release-dist/central-public-state)"
+      if [ "$central_state" = "absent" ]; then
+        # The publisher recovers the deterministic deployment name before
+        # making at most one new upload attempt in this invocation.
+        mvn ${MAVEN_CLI_OPTS} \
+          -Drevision="$LOCKER_SDK_VERSION" \
+          -Dexec.classpathScope=test \
+          -Dexec.mainClass=locker.distribution.CentralPublisher \
+          -Dexec.args="stage release-dist/central-bundle.zip release-dist/central-deployment-id" \
+          exec:java
+        mvn ${MAVEN_CLI_OPTS} \
+          -Drevision="$LOCKER_SDK_VERSION" \
+          -Dexec.classpathScope=test \
+          -Dexec.mainClass=locker.distribution.CentralPublisher \
+          -Dexec.args="publish release-dist/central-deployment-id" \
+          exec:java
+      elif [ "$central_state" != "exact" ]; then
+        echo "unsafe Maven Central public state: $central_state" >&2
+        exit 1
+      fi
+    - >-
+      mvn ${MAVEN_CLI_OPTS}
+      -Drevision="$LOCKER_SDK_VERSION"
+      -Dexec.classpathScope=test
+      -Dexec.mainClass=locker.distribution.CentralPublicReconciler
+      -Dexec.args="wait
+      $CI_PROJECT_DIR/release-dist/central-bundle.zip
+      $LOCKER_SDK_VERSION
+      $MAVEN_GPG_KEY_FILE
+      $CI_PROJECT_DIR/release-dist/central-public-state"
+      exec:java
+    - (cd release-dist && sha256sum --check SHA256SUMS)
+    # Creating/reconciling the GitLab tag and Release is the final mutation.
+    - >-
+      mvn ${MAVEN_CLI_OPTS}
+      -Drevision="$LOCKER_SDK_VERSION"
+      -Dexec.classpathScope=test
+      -Dexec.mainClass=locker.distribution.GitLabReleasePublisher
+      exec:java
+  artifacts:
+    when: always
+    name: lockersm-java-release-${CI_COMMIT_SHA}
+    paths:
+      - release-dist/
+      - release.env
+    expire_in: 30 days
   rules:
-    - if: '$CI_COMMIT_REF_PROTECTED == "true" && $CI_COMMIT_TAG =~ /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?$/'
-      when: manual
-      allow_failure: false
-    - when: never
+    # Create the job even when protection is misconfigured so it fails visibly.
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'

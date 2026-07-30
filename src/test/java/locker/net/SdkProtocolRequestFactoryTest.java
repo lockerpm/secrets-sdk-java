@@ -2,6 +2,7 @@ package locker.net;
 
 import com.google.gson.JsonObject;
 import locker.exception.ApiConnectionError;
+import locker.exception.AuthenticationError;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
@@ -13,10 +14,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class SdkProtocolRequestFactoryTest {
+    private static final String VALID_ACCESS_KEY_ID =
+            "00000000-0000-4000-8000-000000000001";
+    private static final String VALID_SECRET_ACCESS_KEY =
+            "dGVzdC1vbmx5LWNyZWRlbnRpYWw=";
     private static final RequestOptions AUTHENTICATED_OPTIONS =
             RequestOptions.builder()
-                    .setAccessKeyId("fake-access-key")
-                    .setSecretAccessKey("fake-secret-key")
+                    .setAccessKeyId(VALID_ACCESS_KEY_ID)
+                    .setSecretAccessKey(VALID_SECRET_ACCESS_KEY)
                     .build();
 
     @Test
@@ -211,5 +216,95 @@ public class SdkProtocolRequestFactoryTest {
                         environment
                 )
         );
+    }
+
+    @Test
+    public void validatesAndNormalizesCredentialsBeforeProtocolUse()
+            throws Exception {
+        SdkProtocolRequestFactory factory =
+                new SdkProtocolRequestFactory();
+        RequestOptions whitespace = RequestOptions.builder()
+                .setAccessKeyId("  " + VALID_ACCESS_KEY_ID + "  ")
+                .setSecretAccessKey(
+                        "\t" + VALID_SECRET_ACCESS_KEY + System.lineSeparator()
+                )
+                .build();
+
+        SdkProtocolRequestFactory.Credentials credentials =
+                factory.credentials(whitespace, Map.of());
+        JsonObject params = factory.addContext(
+                factory.operation(new CliRequest(
+                        CliResource.RequestMethod.GET,
+                        List.of("secret", "get", "--key", "EXAMPLE"),
+                        Map.of(),
+                        whitespace
+                )),
+                whitespace,
+                credentials,
+                true
+        );
+        JsonObject encoded = params
+                .getAsJsonObject("context")
+                .getAsJsonObject("credentials");
+
+        assertEquals(
+                VALID_ACCESS_KEY_ID,
+                encoded.get("access_key_id").getAsString()
+        );
+        assertEquals(
+                VALID_SECRET_ACCESS_KEY,
+                encoded.get("secret_access_key").getAsString()
+        );
+    }
+
+    @Test
+    public void rejectsCredentialsWithStableAuthenticationKinds() {
+        SdkProtocolRequestFactory factory =
+                new SdkProtocolRequestFactory();
+
+        assertAuthenticationFailure(
+                factory,
+                RequestOptions.builder()
+                        .setAccessKeyId(" ")
+                        .setSecretAccessKey(" ")
+                        .build(),
+                "missing_credentials",
+                "access key ID and secret access key are required"
+        );
+        assertAuthenticationFailure(
+                factory,
+                RequestOptions.builder()
+                        .setAccessKeyId("not-a-uuid")
+                        .setSecretAccessKey(VALID_SECRET_ACCESS_KEY)
+                        .build(),
+                "invalid_access_key_id",
+                "access key ID must be a UUIDv4"
+        );
+        assertAuthenticationFailure(
+                factory,
+                RequestOptions.builder()
+                        .setAccessKeyId(VALID_ACCESS_KEY_ID)
+                        .setSecretAccessKey("not canonical base64")
+                        .build(),
+                "malformed_secret_access_key",
+                "secret access key must be non-empty canonical base64"
+        );
+    }
+
+    private static void assertAuthenticationFailure(
+            SdkProtocolRequestFactory factory,
+            RequestOptions options,
+            String expectedKind,
+            String expectedMessage
+    ) {
+        AuthenticationError error = assertThrows(
+                AuthenticationError.class,
+                () -> factory.credentials(options, Map.of())
+        );
+
+        assertEquals(expectedMessage, error.getUserMessage());
+        assertEquals(expectedKind, error.getErrorCode());
+        assertEquals(-32001, error.getProtocolCode());
+        assertEquals(false, error.getRetryable());
     }
 }

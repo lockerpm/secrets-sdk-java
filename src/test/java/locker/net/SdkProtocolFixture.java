@@ -378,8 +378,16 @@ public final class SdkProtocolFixture {
             require(context, "error_contract", "typed-v1");
         }
         JsonObject credentials = context.getAsJsonObject("credentials");
-        require(credentials, "access_key_id", "fake-access-key");
-        require(credentials, "secret_access_key", "fake-secret-key");
+        require(
+                credentials,
+                "access_key_id",
+                "00000000-0000-4000-8000-000000000001"
+        );
+        require(
+                credentials,
+                "secret_access_key",
+                "dGVzdC1vbmx5LWNyZWRlbnRpYWw="
+        );
         JsonObject client = context.getAsJsonObject("client");
         require(client, "name", "locker-java");
         String expectedSdkVersion = System.getProperty(

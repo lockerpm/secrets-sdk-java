@@ -10,6 +10,7 @@ import locker.exception.AlreadyExistsError;
 import locker.exception.ApiConnectionError;
 import locker.exception.ApiError;
 import locker.exception.ApiServerError;
+import locker.exception.AuthenticationError;
 import locker.exception.CliRunError;
 import locker.exception.ConflictError;
 import locker.exception.IntegrityError;
@@ -58,6 +59,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class SdkProtocolClientTest {
+    private static final String VALID_ACCESS_KEY_ID =
+            "00000000-0000-4000-8000-000000000001";
+    private static final String VALID_SECRET_ACCESS_KEY =
+            "dGVzdC1vbmx5LWNyZWRlbnRpYWw=";
+
     @Test
     public void negotiatesCapabilitiesAndReturnsSecretValue() throws Exception {
         LockerClient client = client("success");
@@ -196,6 +202,90 @@ public class SdkProtocolClientTest {
                         .setCursor("")
                         .build()
         );
+    }
+
+    @Test
+    public void rejectsMalformedCredentialsBeforeResolvingOrLaunchingCli() {
+        AtomicInteger identityCalls = new AtomicInteger();
+        AtomicInteger executorCalls = new AtomicInteger();
+        SdkProtocolClient protocolClient = new SdkProtocolClient(
+                (request, limit) -> {
+                    executorCalls.incrementAndGet();
+                    throw new AssertionError(
+                            "malformed credentials launched the CLI"
+                    );
+                },
+                () -> {
+                    identityCalls.incrementAndGet();
+                    return "unused";
+                }
+        );
+        LockerResponseGetterOptions options = LockerClient.builder()
+                .setAccessKeyId(VALID_ACCESS_KEY_ID)
+                .setSecretAccessKey("not canonical base64")
+                .buildOptions();
+        LockerClient client = new LockerClient(
+                new LiveLockerResponseGetter(options, protocolClient)
+        );
+
+        AuthenticationError error = assertThrows(
+                AuthenticationError.class,
+                () -> client.secrets().retrieve(
+                        "DATABASE_PASSWORD",
+                        String.class,
+                        "production"
+                )
+        );
+
+        assertEquals(
+                "malformed_secret_access_key",
+                error.getErrorCode()
+        );
+        assertEquals(
+                "secret access key must be non-empty canonical base64",
+                error.getUserMessage()
+        );
+        assertEquals(0, identityCalls.get());
+        assertEquals(0, executorCalls.get());
+    }
+
+    @Test
+    public void rejectsMalformedCredentialsBeforeManagedCliResolution() {
+        AtomicInteger resolverCalls = new AtomicInteger();
+        LockerResponseGetterOptions options = LockerClient.builder()
+                .setAccessKeyId(VALID_ACCESS_KEY_ID)
+                .setSecretAccessKey("not canonical base64")
+                .buildOptions();
+        LockerClient client = new LockerClient(
+                new LiveLockerResponseGetter(
+                        options,
+                        explicitPath -> {
+                            resolverCalls.incrementAndGet();
+                            throw new AssertionError(
+                                    "malformed credentials resolved the CLI"
+                            );
+                        }
+                )
+        );
+
+        AuthenticationError error = assertThrows(
+                AuthenticationError.class,
+                () -> client.secrets().retrieve(
+                        "DATABASE_PASSWORD",
+                        String.class,
+                        "production"
+                )
+        );
+
+        assertEquals(
+                "malformed_secret_access_key",
+                error.getErrorCode()
+        );
+        assertEquals(
+                "secret access key must be non-empty canonical base64",
+                error.getUserMessage()
+        );
+        assertEquals(0, resolverCalls.get());
     }
 
     @Test
@@ -650,8 +740,8 @@ public class SdkProtocolClientTest {
                     identity::get
             );
             LockerResponseGetterOptions options = LockerClient.builder()
-                    .setAccessKeyId("fake-access-key")
-                    .setSecretAccessKey("fake-secret-key")
+                    .setAccessKeyId(VALID_ACCESS_KEY_ID)
+                    .setSecretAccessKey(VALID_SECRET_ACCESS_KEY)
                     .setHeaders(Map.of(
                             "X-Test-Header",
                             "fake-header-secret"
@@ -823,8 +913,8 @@ public class SdkProtocolClientTest {
         Map<String, String> headers = new HashMap<>();
         headers.put("X-Test-Header", "fake-header-secret");
         LockerResponseGetterOptions options = LockerClient.builder()
-                .setAccessKeyId("fake-access-key")
-                .setSecretAccessKey("fake-secret-key")
+                .setAccessKeyId(VALID_ACCESS_KEY_ID)
+                .setSecretAccessKey(VALID_SECRET_ACCESS_KEY)
                 .setHeaders(headers)
                 .buildOptions();
         CliProcessRunner runner = new CliProcessRunner(
@@ -845,8 +935,8 @@ public class SdkProtocolClientTest {
             SdkProtocolClient protocolClient
     ) {
         LockerResponseGetterOptions options = LockerClient.builder()
-                .setAccessKeyId("fake-access-key")
-                .setSecretAccessKey("fake-secret-key")
+                .setAccessKeyId(VALID_ACCESS_KEY_ID)
+                .setSecretAccessKey(VALID_SECRET_ACCESS_KEY)
                 .buildOptions();
         return new LockerClient(
                 new LiveLockerResponseGetter(options, protocolClient)

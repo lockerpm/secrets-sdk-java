@@ -183,11 +183,31 @@
     },
     {
       "rpc_code": -32001,
-      "kind": "invalid_secret_access_key",
-      "message": "authentication failed",
+      "kind": "missing_credentials",
+      "message": "access key ID and secret access key are required",
       "retryable": false,
-      "sdk_error": "AuthenticationError",
-      "legacy_alias": true
+      "sdk_error": "AuthenticationError"
+    },
+    {
+      "rpc_code": -32001,
+      "kind": "invalid_access_key_id",
+      "message": "access key ID must be a UUIDv4",
+      "retryable": false,
+      "sdk_error": "AuthenticationError"
+    },
+    {
+      "rpc_code": -32001,
+      "kind": "malformed_secret_access_key",
+      "message": "secret access key must be non-empty canonical base64",
+      "retryable": false,
+      "sdk_error": "AuthenticationError"
+    },
+    {
+      "rpc_code": -32001,
+      "kind": "invalid_secret_access_key",
+      "message": "the secret access key does not match the access key ID",
+      "retryable": false,
+      "sdk_error": "AuthenticationError"
     },
     {
       "rpc_code": -32003,

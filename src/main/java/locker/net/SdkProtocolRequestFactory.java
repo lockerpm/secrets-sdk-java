@@ -9,14 +9,24 @@ import locker.exception.AuthenticationError;
 import locker.exception.LockerError;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 final class SdkProtocolRequestFactory {
     static final int PROTOCOL_VERSION = 1;
     static final String PROTOCOL_NAME = "locker.sdk";
     static final String JSON_RPC_VERSION = "2.0";
     static final String CLIENT_NAME = "locker-java";
+    private static final int CODE_AUTHENTICATION = -32001;
+    private static final int MAX_CREDENTIAL_LENGTH = 65_536;
+    private static final Pattern ACCESS_KEY_ID_PATTERN = Pattern.compile(
+            "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+                    + "[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+            Pattern.CASE_INSENSITIVE
+    );
 
     Operation operation(CliRequest request) throws ApiConnectionError {
         if (request == null) {
@@ -137,24 +147,29 @@ final class SdkProtocolRequestFactory {
             RequestOptions options,
             boolean typedErrorContract
     ) throws LockerError {
-        Map<String, String> environment = System.getenv();
-        String accessKeyId = resolveAccessKeyId(
-                options == null ? null : options.getAccessKeyId(),
-                environment
+        return addContext(
+                operation,
+                options,
+                credentials(options),
+                typedErrorContract
         );
-        String secretAccessKey = resolveSecretAccessKey(
-                options == null ? null : options.getSecretAccessKey(),
-                environment
-        );
-        if (accessKeyId == null || secretAccessKey == null) {
-            throw new AuthenticationError(
-                    "Locker access key ID and secret access key are required"
-            );
-        }
+    }
 
+    JsonObject addContext(
+            Operation operation,
+            RequestOptions options,
+            Credentials resolvedCredentials,
+            boolean typedErrorContract
+    ) throws LockerError {
         JsonObject credentials = new JsonObject();
-        credentials.addProperty("access_key_id", accessKeyId);
-        credentials.addProperty("secret_access_key", secretAccessKey);
+        credentials.addProperty(
+                "access_key_id",
+                resolvedCredentials.accessKeyId
+        );
+        credentials.addProperty(
+                "secret_access_key",
+                resolvedCredentials.secretAccessKey
+        );
 
         JsonObject client = new JsonObject();
         client.addProperty("name", CLIENT_NAME);
@@ -180,6 +195,80 @@ final class SdkProtocolRequestFactory {
             params.add(entry.getKey(), entry.getValue().deepCopy());
         }
         return params;
+    }
+
+    Credentials credentials(RequestOptions options) throws AuthenticationError {
+        return credentials(options, System.getenv());
+    }
+
+    Credentials credentials(
+            RequestOptions options,
+            Map<String, String> environment
+    ) throws AuthenticationError {
+        String accessKeyId = resolveAccessKeyId(
+                options == null ? null : options.getAccessKeyId(),
+                environment
+        );
+        String secretAccessKey = resolveSecretAccessKey(
+                options == null ? null : options.getSecretAccessKey(),
+                environment
+        );
+        if (accessKeyId == null || secretAccessKey == null) {
+            throw authenticationError(
+                    "access key ID and secret access key are required",
+                    "missing_credentials"
+            );
+        }
+        if (accessKeyId.length() > MAX_CREDENTIAL_LENGTH
+                || !ACCESS_KEY_ID_PATTERN.matcher(accessKeyId).matches()) {
+            throw authenticationError(
+                    "access key ID must be a UUIDv4",
+                    "invalid_access_key_id"
+            );
+        }
+
+        if (secretAccessKey.length() > MAX_CREDENTIAL_LENGTH) {
+            throw authenticationError(
+                    "secret access key must be non-empty canonical base64",
+                    "malformed_secret_access_key"
+            );
+        }
+
+        byte[] decodedSecret = null;
+        boolean canonicalSecret = false;
+        try {
+            decodedSecret = Base64.getDecoder().decode(secretAccessKey);
+            canonicalSecret = decodedSecret.length > 0
+                    && Base64.getEncoder()
+                    .encodeToString(decodedSecret)
+                    .equals(secretAccessKey);
+        } catch (IllegalArgumentException ignored) {
+            canonicalSecret = false;
+        } finally {
+            if (decodedSecret != null) {
+                Arrays.fill(decodedSecret, (byte) 0);
+            }
+        }
+        if (!canonicalSecret) {
+            throw authenticationError(
+                    "secret access key must be non-empty canonical base64",
+                    "malformed_secret_access_key"
+            );
+        }
+        return new Credentials(accessKeyId, secretAccessKey);
+    }
+
+    private static AuthenticationError authenticationError(
+            String message,
+            String kind
+    ) {
+        return new AuthenticationError(
+                message,
+                kind,
+                CODE_AUTHENTICATION,
+                null,
+                false
+        );
     }
 
     private static JsonObject transport(
@@ -377,7 +466,7 @@ final class SdkProtocolRequestFactory {
     private static String firstConfigured(String... values) {
         for (String value : values) {
             if (value != null && !value.isBlank()) {
-                return value;
+                return value.strip();
             }
         }
         return null;
@@ -418,6 +507,16 @@ final class SdkProtocolRequestFactory {
 
         String getMethod() {
             return method;
+        }
+    }
+
+    static final class Credentials {
+        private final String accessKeyId;
+        private final String secretAccessKey;
+
+        private Credentials(String accessKeyId, String secretAccessKey) {
+            this.accessKeyId = accessKeyId;
+            this.secretAccessKey = secretAccessKey;
         }
     }
 }

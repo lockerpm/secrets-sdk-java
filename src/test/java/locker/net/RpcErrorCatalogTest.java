@@ -36,8 +36,8 @@ public class RpcErrorCatalogTest {
     private static final String CATALOG_RESOURCE =
             "/locker/protocol/locker-rpc-errors.v1.json";
     private static final String CATALOG_SHA256 =
-            "631ac21d6add27f7bac24e889fc565ca"
-                    + "4cdb790c45ee4068c489481ca58594f5";
+            "bec020bea51d694371d738a9a44c1764"
+                    + "4ea66728706d7027f6bc86988ee93c7d";
 
     @Test
     public void vendoredCatalogMatchesRuntimeErrorMapping() throws Exception {

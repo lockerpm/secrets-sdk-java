@@ -32,6 +32,8 @@ public class LiveLockerResponseGetter implements LockerResponseGetter {
     private final LockerResponseGetterOptions options;
     private final boolean fixedProtocolClient;
     private final ManagedCliResolver cliResolver;
+    private final SdkProtocolRequestFactory requestFactory =
+            new SdkProtocolRequestFactory();
     private volatile ClientBinding protocolBinding;
 
     public LiveLockerResponseGetter() {
@@ -98,7 +100,13 @@ public class LiveLockerResponseGetter implements LockerResponseGetter {
                 this.options,
                 request.getOptions()
         );
-        SdkProtocolClient.Payload payload = client().execute(request, merged);
+        SdkProtocolRequestFactory.Credentials credentials =
+                requestFactory.credentials(merged);
+        SdkProtocolClient.Payload payload = client().execute(
+                request,
+                merged,
+                credentials
+        );
         return deserialize(
                 payload.getData(),
                 operationName(request),

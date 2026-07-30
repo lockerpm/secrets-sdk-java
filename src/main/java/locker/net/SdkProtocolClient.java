@@ -112,6 +112,16 @@ final class SdkProtocolClient {
             CliRequest request,
             RequestOptions options
     ) throws LockerError {
+        SdkProtocolRequestFactory.Credentials credentials =
+                requestFactory.credentials(options);
+        return execute(request, options, credentials);
+    }
+
+    Payload execute(
+            CliRequest request,
+            RequestOptions options,
+            SdkProtocolRequestFactory.Credentials credentials
+    ) throws LockerError {
         SdkProtocolRequestFactory.Operation operation =
                 requestFactory.operation(request);
         NegotiatedState state = ensureCapabilities(
@@ -134,6 +144,7 @@ final class SdkProtocolClient {
         JsonObject params = requestFactory.addContext(
                 operation,
                 options,
+                credentials,
                 current.errorContracts.contains(TYPED_ERROR_CONTRACT)
         );
         Payload response = exchange(
@@ -1082,6 +1093,18 @@ final class SdkProtocolClient {
             case CODE_INTERNAL:
                 return "the Locker CLI encountered an internal protocol error";
             case CODE_AUTHENTICATION:
+                if ("missing_credentials".equals(kind)) {
+                    return "access key ID and secret access key are required";
+                }
+                if ("invalid_access_key_id".equals(kind)) {
+                    return "access key ID must be a UUIDv4";
+                }
+                if ("malformed_secret_access_key".equals(kind)) {
+                    return "secret access key must be non-empty canonical base64";
+                }
+                if ("invalid_secret_access_key".equals(kind)) {
+                    return "the secret access key does not match the access key ID";
+                }
                 return "authentication failed";
             case CODE_PERMISSION:
                 return "you do not have permission to perform this operation";

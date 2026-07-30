@@ -526,7 +526,7 @@ try {
 | `-32602` | `ProtocolError` | `invalid_params` |
 | `-32603` | `ProtocolError` | `internal_protocol_error` |
 | `-32000` | `ApiError` and legacy subtypes | `operation_error`, `request_rejected`, `response_too_large`, `cancelled` |
-| `-32001` | `AuthenticationError` | `unauthorized`; legacy `invalid_secret_access_key` |
+| `-32001` | `AuthenticationError` | `missing_credentials`, `invalid_access_key_id`, `malformed_secret_access_key`, `invalid_secret_access_key`, `unauthorized` |
 | `-32003` | `PermissionDeniedError` | `forbidden`; legacy `permission_denied` |
 | `-32004` | `ResourceNotFoundError` | `secret_not_found`, `environment_not_found`; legacy `not_found_error` |
 | `-32009` | `ConflictError` / `AlreadyExistsError` | `conflict`, `secret_already_exists`, `environment_already_exists` |
@@ -548,6 +548,13 @@ integrity, protocol, cancellation, and internal-server errors force
 unknown server-range code can preserve a true hint. `RateLimitError` exposes
 an optional validated `getRetryAfterSeconds()` value from 0 through 86400.
 The SDK never automatically retries a vault RPC.
+
+Credentials are normalized and validated before the SDK resolves, downloads,
+or launches a CLI binary. Access key IDs must be UUIDv4 values and secret
+access keys must be non-empty canonical standard Base64. A structurally valid
+pair that does not match is reported as `invalid_secret_access_key`; a backend
+HTTP 401 remains the deliberately generic `unauthorized`. Authentication
+exceptions never expose either credential or raw backend response text.
 
 Typed errors are negotiated additively. The SDK sends
 `context.error_contract = "typed-v1"` only when the exact contract appears in

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Validate UUIDv4 access key IDs and canonical Base64 secret access keys
+  before resolving or launching the CLI.
+- Preserve the shared authentication error kinds and safe messages across
+  malformed credentials, mismatched key pairs, and backend authorization
+  failures.
+
 ## [1.0.0] - 2026-07-26
 
 ### Changed

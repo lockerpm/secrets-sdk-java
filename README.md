@@ -127,7 +127,8 @@ LockerClient client = LockerClient.builder()
 
 The default client resolves the managed CLI lazily. Applications that want to
 prepare it during startup or deployment can call the same lifecycle
-explicitly:
+explicitly. Release information and manual downloads are available from the
+[signed release channel](https://locker.io/secrets/download).
 
 ```java
 import java.nio.file.Path;
@@ -448,15 +449,17 @@ canonical `LOCKER_*` credentials.
 
 - Authentication/permission errors: verify the complete credential pair and
   its project/environment scope.
-- `CliDistributionException`: check system time, HTTPS access to
-  `files.locker.io`, and private ownership below `~/.locker/sdk-cli/java`.
+- `CliDistributionException`: check system time, access to the
+  [Locker Secrets download service](https://locker.io/secrets/download), and
+  private ownership below `~/.locker/sdk-cli/java`.
 - `CliRunError`: check the absolute CLI path and configured timeout; never log
   application arguments that may contain secret values.
 - Protocol errors: upgrade the SDK and CLI together or remove an incompatible
   explicit `LOCKER_CLI_PATH`.
 
 Product help is available at [support.locker.io](https://support.locker.io).
-Report vulnerabilities privately to <contact@locker.io>.
+Report vulnerabilities through the
+[Locker Bug Bounty program](https://whitehub.net/programs/locker).
 
 ## License
 

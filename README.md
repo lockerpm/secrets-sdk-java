@@ -54,10 +54,8 @@ Without either override, the SDK verifies or refreshes its managed binary when
 the first operation runs. Importing the package and constructing a client or
 installer never performs filesystem or network I/O.
 
-The stable, reviewed production trust root is compiled into
-`LockerCliInstaller` and mirrored in the committed public-key resource for
-release attestation. Runtime lookup never accepts a same-name resource from
-another classpath entry. CI never rewrites either copy.
+The production trust root is embedded in the SDK. Runtime lookup never accepts
+a same-name resource from another classpath entry.
 
 Use the Locker-prefixed environment variables for credentials:
 
@@ -113,6 +111,18 @@ LockerClient client = LockerClient.builder()
         .build();
 ```
 
+An optional API base and custom transport headers can be configured on the
+builder:
+
+```java
+import java.util.Map;
+
+LockerClient client = LockerClient.builder()
+        .setApiBase("https://api.locker.io/locker_secrets")
+        .setHeaders(Map.of("CF-Access-Client-Id", clientId))
+        .build();
+```
+
 ## Signed managed CLI updates
 
 The default client resolves the managed CLI lazily. Applications that want to
@@ -127,182 +137,16 @@ import locker.distribution.LockerCliInstaller;
 Path installedCli = new LockerCliInstaller().install();
 ```
 
-Update-channel v2 has one trust root: the raw 32-byte Ed25519 public key
-compiled into the installer as canonical base64url. The matching
-`locker-cli-ed25519-public-key.txt` resource lets release verification attest
-the source, compiled classes, and packaged JAR. The updater fetches the exact
-`https://files.locker.io/cli/releases/latest.json` endpoint without redirects, verifies
-its signed canonical JSON envelope, then verifies the referenced signed
-version manifest. It requires the exact five supported platform targets and
-binds the selected artifact's version, path, size, SHA-256, and detached
-Ed25519 signature to those documents.
+Managed downloads are accepted only after the signed release metadata,
+manifest, binary digest, detached signature, and executable platform header
+all verify. Verified versions are stored privately and activated atomically.
+The SDK revalidates the selected managed executable before use and rejects
+rollback, tampering, unsafe paths, and insecure cache ownership.
 
-Downloaded binaries are streamed through a bounded whole-response deadline
-into a private same-filesystem temporary file. Before publication, the updater
-verifies the declared 1..256 MiB size, digest, detached signature, and strict
-ELF/Mach-O/PE target header. It flushes every file, atomically publishes one
-complete immutable generation, fully reverifies that generation, and replaces
-the small current pointer last. Metadata, state, and every cached binary are
-revalidated under a bounded interprocess lock. Symlinks/reparse points,
-permissive ownership, partial files, unknown schema fields, duplicate JSON
-keys, non-canonical encodings, rollback, and same-version equivocation fail
-closed.
-
-A successful check is persisted for six hours. Each later SDK operation
-resolves the managed path again; a long-running client atomically rebuilds its
-protocol/capability client when the selected generation changes. A due check
-always revalidates the signed latest pointer and manifest, without downloading
-an unchanged artifact. The accepted `(version, source_commit, manifest
-SHA-256, manifest size)` high-water tuple is persisted before any manifest
-request, independently from the successful-check timestamp, so a partial
-update cannot later permit rollback or same-version equivocation. A transient
-fallback gets a 60-second retry marker without advancing the six-hour success
-interval.
-
-Immediately before every CLI subprocess spawn, the SDK cryptographically
-rebinds the selected managed executable to its signed manifest, streamed
-size/SHA-256, and executable header within the operation timeout. The detached
-Ed25519 signature is verified when a generation is installed or first loaded
-into the process; subsequent same-generation rebinds use a bounded 8 KiB
-buffer instead of retaining the binary in memory. File identity metadata is
-only a capability-cache optimization and is never a managed-binary trust
-decision. A same-size in-place modification is rejected even if its mtime is
-restored; the active generation is not silently repaired in that execution
-path. Explicit absolute paths remain caller-owned and receive only the
-documented regular-file/identity checks, not managed-channel validation.
-
-Only DNS/connect/timeout transport failures and HTTP 408, 425, 429, or
-500..599 may fall back to a completely verified cache. TLS/certificate,
-signature, schema, executable-header, hash, size, rollback, state, and other
-integrity failures never use an offline fallback. A process crash at any
-publication boundary leaves either the old pointed generation or the complete
-new one recoverable offline.
-
-## Release safety
-
-Every merge commit pushed to the protected `main` branch is released
-automatically. Tag pipelines are ignored, so the tag created at the end of a
-successful release cannot recursively start another pipeline. Direct,
-fast-forward, squash, and rebased updates to the release line fail closed:
-each first-parent commit after the reviewed baseline must have exactly two
-parents.
-
-Concurrent main pipelines share the `lockersm-maven-central` resource group.
-Configure that group once with GitLab process mode `oldest_first`; for example,
-a Maintainer can call `PUT /projects/:id/resource_groups/lockersm-maven-central`
-with `process_mode=oldest_first` through the GitLab API after the group first
-appears. Keep the predecessor-tag gate enabled as the authoritative release
-order invariant: every release after the first polls for its exact predecessor
-tag and requires it to resolve to the immediately preceding first-parent
-merge. Because a tag is created only after the predecessor is byte-for-byte
-public on Maven Central, a newer pipeline cannot publish out of order even if
-external GitLab scheduling is misconfigured.
-
-The version is derived deterministically from first-parent merge distance.
-The first eligible merge is `1.0.0`, the next is `1.0.1`, and so on. Maven's
-CI-friendly `revision` property is the single source of the base version; the
-published flattened POM and JAR manifest contain the resolved release version,
-and runtime protocol metadata reads that manifest rather than a separately
-maintained constant or file.
-
-The protected `auto-release` job requires:
-
-- protected-main governance that rejects `[ci skip]` and `[skip ci]` commit
-  messages and rejects the `ci.skip` and `ci.no_pipeline` Git push options
-  (use a project push rule or a self-managed GitLab pre-receive hook), so no
-  release-line merge can bypass its mandatory pipeline;
-- a protected, masked `LOCKER_CLI_RELEASE_PUBLIC_KEY` variable containing
-  exactly one canonical base64url-encoded raw 32-byte Ed25519 public key,
-  without spaces or a trailing newline, byte-equal to the committed trust
-  root;
-- a protected `MAVEN_GPG_KEY_FILE` file variable and masked
-  `MAVEN_GPG_PASSPHRASE`;
-- masked `MAVEN_CENTRAL_USERNAME` and `MAVEN_CENTRAL_PASSWORD` variables
-  containing the Central Portal-generated user-token pair, not the account
-  password. The release client uses the documented Central Portal form
-  (`Authorization: Bearer <base64(user:token)>`).
-
-Release validation fails closed when `LICENSE` is absent or empty, the tag
-does not equal `v` plus the POM/SDK version, the public key is malformed, or
-the key embedded in the built SDK differs byte-for-byte from the protected
-release key. The verifier reads the committed source resource and compiled
-main resource by filesystem path, never through the test classpath, and the
-Central bundle builder independently verifies the entry in the exact JAR
-bytes it packages.
-
-The `release` Maven profile signs one artifact set. CI builds and independently
-verifies the resulting Central deployment bundle, records its SHA-256,
-and checks the exact public Maven coordinates before any upload. If that
-version is absent, CI makes one upload attempt, waits for `VALIDATED`, promotes
-that deployment, and then waits until every expected public payload is
-byte-identical. It requires Central's MD5/SHA-1 public payload sidecars and
-verifies SHA-256/SHA-512 sidecars whenever Central exposes them; the
-authenticated pre-publication deployment must preserve all four submitted
-payload sidecars byte-for-byte. Detached OpenPGP signatures include a creation
-timestamp, so
-their armor is not compared byte-for-byte: each local and public signature
-must instead verify the exact payload with SHA-512 and the precise fingerprint
-derived from `MAVEN_GPG_KEY_FILE`. This lets a rerun safely skip an already
-public release without accepting a different signer. A partial or conflicting
-public version never triggers another upload.
-
-The release job uses a test-scope Java release client rather than
-putting an authorization header in a shell command. It reads Central
-credentials only from the protected environment, rejects delimiters and
-control characters, never logs them, refuses redirects, bounds every response,
-and parses status JSON strictly. Duplicate or escaped-duplicate fields,
-trailing data, non-string identifiers/states, unknown states, and a response
-whose deployment ID does not exactly match the persisted ID all fail closed.
-
-The Central upload endpoint has no caller-supplied idempotency key. Before
-uploading, CI therefore searches the authenticated deployment list for the
-deterministic release name. After an ambiguous upload response it polls that
-same name, accepts exactly one matching deployment, and fails closed if more
-than one exists. A recovered deployment is not trusted by name alone: after
-validation, CI downloads every payload and detached signature by deployment
-ID, requires byte-identical payloads and checksum sidecars, and
-cryptographically verifies the signatures against the protected signing key.
-Central explicitly does not require checksum sidecars for `.asc` signature
-files, so the bundle omits that unnecessary file-count overhead. This makes
-the bounded GitLab retry safe when a runner or network connection is lost.
-Once Central is
-byte-for-byte public, CI creates or exactly reconciles the GitLab tag and
-Release as its final mutation using the built-in `CI_JOB_TOKEN`. Protect the
-`main` branch, `v*` tags, the `maven-central` environment, and every listed variable in
-GitLab project settings.
-
-After the first pipeline creates the resource group, a Maintainer must run:
-
-```shell
-curl --request PUT \
-  --header "PRIVATE-TOKEN: <maintainer-token>" \
-  --data "process_mode=oldest_first" \
-  "https://git.cystack.org/api/v4/projects/<project-id>/resource_groups/lockersm-maven-central"
-```
-
-Do not hard-code credentials or secret values in source code. The SDK starts
-the child CLI with a small operating-system/proxy/certificate environment
-allowlist, so application secrets are not inherited accidentally.
-It continuously records descendant handles and, on timeout, interruption, or
-even a successful root exit, performs bounded graceful/forced cleanup and
-verifies that every recorded process stopped. Java 11 exposes neither portable
-POSIX process groups nor Windows Job Objects, so a process created and
-re-parented entirely between samples remains a standard-library limitation.
-The supported trust boundary is therefore an explicit caller-owned CLI or the
-cryptographically verified managed binary; run any untrusted executable under
-an OS/container supervisor.
-
-An optional API base and custom transport headers can be configured on the
-builder:
-
-```java
-import java.util.Map;
-
-LockerClient client = LockerClient.builder()
-        .setApiBase("https://api.locker.io/locker_secrets")
-        .setHeaders(Map.of("CF-Access-Client-Id", clientId))
-        .build();
-```
+A temporary release-channel outage may reuse a previously verified compatible
+binary. TLS, signature, schema, hash, platform, rollback, and local integrity
+failures always fail closed. Explicit absolute CLI paths remain caller-owned
+and are not treated as managed, signed artifacts.
 
 ## Retrieve a secret
 
@@ -567,6 +411,12 @@ not included in the default exception text.
 
 ## Protocol and process safety
 
+Do not hard-code credentials or secret values in source code. The SDK starts
+the child CLI with a small operating-system/proxy/certificate environment
+allowlist, so application secrets are not inherited accidentally. On timeout
+or interruption it performs bounded process-tree cleanup. Run any
+caller-supplied executable under an appropriate OS or container supervisor.
+
 Before the first vault operation, the SDK negotiates `system.capabilities` and
 requires Locker SDK protocol v1, the eight base vault methods plus
 `system.capabilities`, and positive request/response byte limits. Paginated
@@ -582,36 +432,12 @@ advertised. Each request:
 - validates the response envelope, request ID, required types, and protocol
   version.
 
-## Development
+## Versioning
 
-Run the hermetic unit and protocol tests:
-
-```shell
-mvn --strict-checksums test
-```
-
-Build the binary, source, and Javadoc artifacts:
-
-```shell
-mvn --strict-checksums package
-```
-
-GitLab uses an immutable official Maven/Temurin 11 image digest. Maven strict
-checksum mode and the Enforcer rule reject corrupted repository responses and
-snapshot dependencies; the content-keyed `.m2` cache is an optimization, not
-a trust source. CI does not install build tools through `apt`, `apk`, `curl`,
-or `wget`.
-
-Run the optional protocol negotiation check against a real local CLI:
-
-```shell
-LOCKER_INTEGRATION_CLI=/path/to/locker \
-  mvn -Dtest=locker.net.RealCliConformanceTest test
-```
-
-Live functional tests require `LOCKER_TEST_ACCESS_KEY_ID` and
-`LOCKER_TEST_SECRET_ACCESS_KEY`. They are intentionally separate from the
-default unit-test suite; never commit real credentials to test sources.
+The SDK follows Semantic Versioning. Maven Central artifacts use
+`MAJOR.MINOR.PATCH`; matching source releases use
+`vMAJOR.MINOR.PATCH`. See the release notes when upgrading across a major
+version.
 
 ## Migration, troubleshooting, and support
 

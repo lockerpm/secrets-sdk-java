@@ -453,11 +453,11 @@ public class CentralPublicReconcilerTest {
                 : CHECKSUMS.entrySet()) {
             bodies.put(
                     path + checksum.getKey(),
-                    hexadecimal(MessageDigest.getInstance(
-                            checksum.getValue()
-                    ).digest(artifact)).getBytes(
-                            StandardCharsets.US_ASCII
-                    )
+                    (
+                            hexadecimal(MessageDigest.getInstance(
+                                    checksum.getValue()
+                            ).digest(artifact)) + "\n"
+                    ).getBytes(StandardCharsets.US_ASCII)
             );
         }
     }

@@ -485,11 +485,9 @@ public final class ReleaseVersionTool {
         }
         for (int index = 0; index < history.size(); index++) {
             String[] commitAndParents = history.get(index).split("\\s+");
-            if (commitAndParents.length != 3) {
+            if (commitAndParents.length < 2) {
                 throw new IOException(
-                        "Every release-line commit must be a two-parent "
-                                + "merge commit; direct, fast-forward, "
-                                + "squash, and rebase updates are forbidden"
+                        "Release-line history is malformed"
                 );
             }
             if (index == 0

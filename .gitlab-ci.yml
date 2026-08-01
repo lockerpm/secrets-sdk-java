@@ -139,7 +139,9 @@ auto-release:
             ;;
         esac
       fi
-      exit "$release_error"
+      if [ "$release_error" -ne 0 ]; then
+        exit 1
+      fi
     - git fetch --force --tags origin
     # Compile only the test-scope release tools at the reviewed base revision.
     - mvn ${MAVEN_CLI_OPTS} -DskipTests test-compile

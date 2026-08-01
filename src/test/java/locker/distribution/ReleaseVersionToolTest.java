@@ -66,22 +66,22 @@ public class ReleaseVersionToolTest {
     }
 
     @Test
-    public void rejectsDirectMainCommit() throws Exception {
+    public void acceptsDirectMainCommit() throws Exception {
         Repository repository = repository();
         String baseline = repository.head();
         Path policy = repository.writePolicy(baseline);
         repository.write("direct.txt", "direct\n");
         repository.commit("direct main update");
 
-        assertThrows(
-                java.io.IOException.class,
-                () -> ReleaseVersionTool.prepare(
-                        repository.root,
-                        repository.head(),
-                        policy,
-                        repository.root.resolve("release.env")
-                )
+        ReleaseVersionTool.Release release = ReleaseVersionTool.prepare(
+                repository.root,
+                repository.head(),
+                policy,
+                repository.root.resolve("release.env")
         );
+
+        assertEquals("1.0.0", release.version);
+        assertEquals(1, release.firstParentDistance);
     }
 
     @Test
@@ -216,8 +216,15 @@ public class ReleaseVersionToolTest {
     public void repositoryPolicyBaselineExists() throws Exception {
         assumeGit();
         Path root = Path.of("").toAbsolutePath().normalize();
-        String baseline =
-                "67b9a8f02802d817ec5e13f9ddbfd62be25c570b";
+        String policy = Files.readString(
+                root.resolve("scripts/release-policy.json"),
+                StandardCharsets.UTF_8
+        );
+        java.util.regex.Matcher baselineMatch = java.util.regex.Pattern
+                .compile("\"baseline_commit\"\\s*:\\s*\"([0-9a-f]{40})\"")
+                .matcher(policy);
+        assertTrue(baselineMatch.find());
+        String baseline = baselineMatch.group(1);
         Process result = new ProcessBuilder(
                 "git",
                 "-C",

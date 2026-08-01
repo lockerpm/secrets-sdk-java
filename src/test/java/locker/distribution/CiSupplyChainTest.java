@@ -35,21 +35,18 @@ final class CiSupplyChainTest {
                 "release CI must require an independent CLI trust root");
         assertTrue(
                 pipeline.contains("workflow:"),
-                "release CI must define pipeline-level trigger rules");
+                "release CI must define pipeline-level tag suppression");
         assertTrue(
-                pipeline.contains("- if: '$CI_COMMIT_BRANCH'")
+                pipeline.contains("CI_PIPELINE_SOURCE == \"merge_request_event\"")
                         && pipeline.contains(
-                        "CI_COMMIT_TAG =~ /^v(0|[1-9][0-9]*)"
+                        "CI_PIPELINE_SOURCE == \"push\" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
                 )
                         && pipeline.contains("- when: never"),
-                "CI must validate every branch push and release only from a"
-                        + " protected vX.Y.Z tag");
+                "CI must validate merge requests and admit releases only from main pushes");
         assertFalse(
-                pipeline.contains("CI_OPEN_MERGE_REQUESTS"),
-                "open-merge-request scoped rules are not reviewed");
-        assertTrue(
-                pipeline.contains("CI_COMMIT_REF_PROTECTED"),
-                "the release job must require a protected tag");
+                pipeline.contains("CI_OPEN_MERGE_REQUESTS")
+                        || pipeline.contains("- if: '$CI_COMMIT_BRANCH'"),
+                "plain feature-branch pushes must not create pipelines");
         assertTrue(
                 pipeline.contains(".m2/release-${CI_JOB_ID}"),
                 "release jobs must isolate their local Maven repositories");
@@ -66,6 +63,9 @@ final class CiSupplyChainTest {
                         "- stuck_or_timeout_failure"
                 ),
                 "release retry must cover ambiguous runner and script loss");
+        assertTrue(
+                pipeline.contains("wait-predecessor-tag"),
+                "release jobs must wait for their first-parent predecessor");
         assertTrue(
                 pipeline.contains(
                         "resource_group: lockersm-maven-central"

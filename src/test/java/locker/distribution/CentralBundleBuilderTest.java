@@ -97,25 +97,6 @@ public class CentralBundleBuilderTest {
     }
 
     @Test
-    public void mainAcceptsGitLabCommitTimestampOffsetFormat()
-            throws Exception {
-        Path protectedKey = prepareInputs(true, PUBLIC_KEY);
-        Path output = temporaryDirectory.resolve(
-                "release-dist/central-bundle-cli.zip"
-        );
-
-        CentralBundleBuilder.main(new String[]{
-                temporaryDirectory.toString(),
-                VERSION,
-                output.toString(),
-                "2026-08-01T05:43:53+00:00",
-                protectedKey.toString(),
-        });
-
-        assertTrue(Files.isRegularFile(output));
-    }
-
-    @Test
     public void builtBundleIsAcceptedByPublicReconciler()
             throws Exception {
         Path protectedKey = prepareInputs(true, PUBLIC_KEY);

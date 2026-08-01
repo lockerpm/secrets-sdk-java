@@ -343,7 +343,8 @@ public final class CentralPublicReconciler {
                                 response.body,
                                 artifactBytes,
                                 checksum.getValue(),
-                                checksumPath
+                                checksumPath,
+                                requireAllBundleChecksums
                         );
                     }
                 } else if (response.statusCode != 404) {
@@ -365,10 +366,12 @@ public final class CentralPublicReconciler {
             byte[] sidecar,
             byte[] artifact,
             String algorithm,
-            String path
+            String path,
+            boolean trailingLineFeed
     ) throws IOException {
         byte[] expected = (
-                hexadecimal(digest(algorithm, artifact)) + "\n"
+                hexadecimal(digest(algorithm, artifact))
+                        + (trailingLineFeed ? "\n" : "")
         ).getBytes(StandardCharsets.US_ASCII);
         try {
             if (!MessageDigest.isEqual(expected, sidecar)) {

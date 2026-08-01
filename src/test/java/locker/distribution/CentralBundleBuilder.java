@@ -12,7 +12,6 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -66,7 +65,7 @@ public final class CentralBundleBuilder {
         Path projectRoot = Path.of(arguments[0]);
         String version = arguments[1];
         Path output = Path.of(arguments[2]);
-        Instant timestamp = OffsetDateTime.parse(arguments[3]).toInstant();
+        Instant timestamp = Instant.parse(arguments[3]);
         Path expectedPublicKeyPath = Path.of(arguments[4]);
         String sha256 = build(
                 projectRoot,

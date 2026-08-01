@@ -5,13 +5,15 @@ stages:
   - release
 
 workflow:
-  # The release job creates vX.Y.Z. Never recursively start a tag pipeline
-  # for anything but a reviewed release tag.
+  # A protected-main merge is a release. Do not cancel an older release while
+  # a newer merge is validating, and never recurse from the generated tag.
   auto_cancel:
     on_new_commit: none
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/'
-    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
     - when: never
 
 default:
@@ -54,10 +56,8 @@ quality:
     - test -s .flattened-pom.xml
     - "! grep -F '${revision}' .flattened-pom.xml"
     - git diff --check
-  rules:
-    - if: '$CI_COMMIT_BRANCH'
 
-release-version:
+release-policy:
   stage: validate
   variables:
     GIT_DEPTH: "0"
@@ -67,10 +67,8 @@ release-version:
       mvn ${MAVEN_CLI_OPTS}
       -Dtest=locker.distribution.ReleaseVersionToolTest
       test
-  rules:
-    - if: '$CI_COMMIT_BRANCH'
 
-release:
+auto-release:
   stage: release
   resource_group: lockersm-maven-central
   cache: []
@@ -101,7 +99,11 @@ release:
     - |
       release_error=0
       if [ "${CI_COMMIT_REF_PROTECTED:-}" != "true" ]; then
-        echo "release tags must be protected" >&2
+        echo "default branch must be protected before release" >&2
+        release_error=1
+      fi
+      if [ "${CI_DEFAULT_BRANCH:-}" != "main" ]; then
+        echo "main must remain the GitLab default branch" >&2
         release_error=1
       fi
       for variable in \
@@ -137,18 +139,28 @@ release:
             ;;
         esac
       fi
-      if [ "$release_error" -ne 0 ]; then
-        exit 1
-      fi
-    - git fetch --force origin main
-    # Compile only the test-scope release tools at the tagged revision.
+      exit "$release_error"
+    - git fetch --force --tags origin
+    # Compile only the test-scope release tools at the reviewed base revision.
     - mvn ${MAVEN_CLI_OPTS} -DskipTests test-compile
+    # Configure this resource group's process mode to oldest_first once in
+    # GitLab. The predecessor tag remains the authoritative release-order gate.
     - >-
       mvn ${MAVEN_CLI_OPTS}
       -Dexec.classpathScope=test
       -Dexec.mainClass=locker.distribution.ReleaseVersionTool
-      -Dexec.args="prepare $CI_PROJECT_DIR $CI_COMMIT_TAG
-      $CI_COMMIT_SHA $CI_PROJECT_DIR/release.env"
+      -Dexec.args="wait-predecessor-tag $CI_PROJECT_DIR origin
+      $CI_COMMIT_SHA $CI_PROJECT_DIR/scripts/release-policy.json"
+      exec:java
+    # Import a predecessor tag that may have appeared while this job waited.
+    - git fetch --force --tags origin
+    - >-
+      mvn ${MAVEN_CLI_OPTS}
+      -Dexec.classpathScope=test
+      -Dexec.mainClass=locker.distribution.ReleaseVersionTool
+      -Dexec.args="prepare $CI_PROJECT_DIR $CI_COMMIT_SHA
+      $CI_PROJECT_DIR/scripts/release-policy.json
+      $CI_PROJECT_DIR/release.env"
       exec:java
     - set -a
     - . ./release.env
@@ -159,6 +171,14 @@ release:
       printf '%s\n' "$LOCKER_CLI_RELEASE_PUBLIC_KEY" >
       release-dist/locker-cli-ed25519-public-key.txt
     - export LOCKER_CLI_PUBLIC_KEY_FILE="$CI_PROJECT_DIR/release-dist/locker-cli-ed25519-public-key.txt"
+    # A conflicting tag must fail before Maven Central receives any bytes.
+    - >-
+      mvn ${MAVEN_CLI_OPTS}
+      -Dexec.classpathScope=test
+      -Dexec.mainClass=locker.distribution.ReleaseVersionTool
+      -Dexec.args="verify-remote-tag $CI_PROJECT_DIR origin
+      $LOCKER_RELEASE_TAG $CI_COMMIT_SHA"
+      exec:java
     - >-
       mvn ${MAVEN_CLI_OPTS}
       -Drevision="$LOCKER_SDK_VERSION"
@@ -244,4 +264,5 @@ release:
       - release.env
     expire_in: 30 days
   rules:
-    - if: '$CI_COMMIT_TAG =~ /^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/'
+    # Create the job even when protection is misconfigured so it fails visibly.
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
